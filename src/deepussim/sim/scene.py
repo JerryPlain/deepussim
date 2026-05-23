@@ -62,6 +62,9 @@ class SceneConfig:
     phantom_pos: tuple[float, float, float] = (0.55, 0.0, 0.04)  # within reach (m)
     dt: float = 1e-2
     show_viewer: bool = False
+    camera_pos: tuple[float, float, float] = (1.4, -1.0, 0.9)   # viewer camera (m)
+    camera_lookat: tuple[float, float, float] = (0.45, 0.0, 0.1)
+    camera_fov: float = 40.0
     ee_link_name: str = "hand"
     n_arm_dofs: int = 7
     # T_ee_from_probe: hand-eye offset placing the US image plane relative to the EE.
@@ -103,8 +106,16 @@ class UltrasoundScene:
                 gs.init(backend=gs.cpu)
             _GS_INITIALIZED = True
 
+        viewer_options = None
+        if self.cfg.show_viewer:
+            viewer_options = gs.options.ViewerOptions(
+                camera_pos=self.cfg.camera_pos,
+                camera_lookat=self.cfg.camera_lookat,
+                camera_fov=self.cfg.camera_fov,
+            )
         self._scene = gs.Scene(
             sim_options=gs.options.SimOptions(dt=self.cfg.dt),
+            viewer_options=viewer_options,
             show_viewer=self.cfg.show_viewer,
         )
         self._scene.add_entity(gs.morphs.Plane())
