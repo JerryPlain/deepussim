@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.installed.cfg
+*.egg
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Data — never commit raw scans / generated datasets
+data/
+datasets/
+*.nii
+*.nii.gz
+*.dcm
+*.npz
+!tests/**/*.npz
+
+# Outputs
+outputs/
+runs/
+*.png
+!docs/**/*.png
+
+# OS / editor
+.DS_Store
+*.swp
+.vscode/
+.idea/

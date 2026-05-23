@@ -1,0 +1,12 @@
+# Probe trajectory for scale-up sampling (deepussim.pipeline.sampling).
+# Coordinates are in the CBCT/volume world frame (mm). run_scaleup.py currently
+# derives a sweep from the volume centre; wire this in to override that.
+trajectory:
+  type: linear_sweep        # linear_sweep | tilt_fan
+  n: 64                     # number of poses
+  axial_dir: [0.0, 0.0, -1.0]   # probe +z (imaging depth) direction in world frame
+  # linear_sweep:
+  start_mm: [-20.0, 0.0, 24.0]  # offsets are relative to volume centre in run_scaleup
+  end_mm:   [ 20.0, 0.0, 24.0]
+  # tilt_fan (used when type == tilt_fan):
+  max_tilt_deg: 20.0

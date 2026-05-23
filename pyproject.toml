@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepussim"
+version = "0.0.1"
+description = "Genesis-based ultrasound simulation: CBCT reslicing + US rendering, calibrated against robot-collected real data, scaled up in sim."
+readme = "README.md"
+# Genesis (genesis-world) supports Python 3.10-3.12, NOT 3.13 yet.
+# Recommended: `conda create -n deepussim python=3.11`
+requires-python = ">=3.10,<3.13"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pyyaml>=6.0",
+    "nibabel>=5.0",      # NIfTI CBCT / label-volume IO
+    "SimpleITK>=2.3",    # DICOM series IO + resampling
+    "imageio>=2.31",     # save US frames / masks as png
+    "tqdm>=4.66",
+    # Sim. After first install, pin: `pip freeze | grep genesis-world`
+    "genesis-world",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "ruff>=0.4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

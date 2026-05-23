@@ -1,0 +1,18 @@
+# US image-formation parameters (Step 4 calibrates these against real US).
+# Consumed by deepussim.us.renderer.RendererParams.
+renderer:
+  freq_mhz: 5.0             # probe centre frequency
+  atten_db_cm_mhz: 0.5      # soft-tissue attenuation coefficient (round-trip applied internally)
+  tgc_db_cm: 0.5            # time-gain compensation slope (compensates attenuation with depth)
+  reflect_scale: 1.0        # scales interface reflectivity (impedance-gradient -> echo)
+  speckle_sigma: 0.5        # lognormal multiplicative speckle std
+  gain_db: 0.0              # overall brightness offset
+  dynamic_range_db: 50.0    # log-compression window
+  seed: 0                   # speckle RNG seed (null = nondeterministic)
+
+# Imaging geometry of the synthetic linear probe (deepussim.us.reslice.ProbeGeometry).
+geometry:
+  width_mm: 40.0            # lateral field of view at the probe face
+  depth_mm: 80.0            # axial imaging depth into tissue
+  n_lat: 256               # lateral samples (image width, px)
+  n_ax: 512                # axial samples (image height, px)
