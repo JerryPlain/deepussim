@@ -91,3 +91,58 @@ def is_rigid(T: Array, tol: float = 1e-6) -> bool:
     return bool(
         np.allclose(R @ R.T, np.eye(3), atol=tol) and abs(np.linalg.det(R) - 1.0) < tol
     )
+
+
+# --- quaternions ----------------------------------------------------------
+# Scalar-first (w, x, y, z) convention, matching Genesis' IK/pose API.
+
+def quat_to_mat(q) -> Array:
+    """Scalar-first unit quaternion (w, x, y, z) -> 3x3 rotation matrix."""
+    q = np.asarray(q, dtype=float)
+    q = q / (np.linalg.norm(q) + 1e-12)
+    w, x, y, z = q
+    return np.array(
+        [
+            [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+        ],
+        dtype=float,
+    )
+
+
+def mat_to_quat(R) -> Array:
+    """3x3 rotation matrix -> scalar-first unit quaternion (w, x, y, z)."""
+    R = np.asarray(R, dtype=float)[:3, :3]
+    tr = np.trace(R)
+    if tr > 0:
+        s = np.sqrt(tr + 1.0) * 2.0
+        w = 0.25 * s
+        x = (R[2, 1] - R[1, 2]) / s
+        y = (R[0, 2] - R[2, 0]) / s
+        z = (R[1, 0] - R[0, 1]) / s
+    elif R[0, 0] >= R[1, 1] and R[0, 0] >= R[2, 2]:
+        s = np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2]) * 2.0
+        w = (R[2, 1] - R[1, 2]) / s
+        x = 0.25 * s
+        y = (R[0, 1] + R[1, 0]) / s
+        z = (R[0, 2] + R[2, 0]) / s
+    elif R[1, 1] >= R[2, 2]:
+        s = np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2]) * 2.0
+        w = (R[0, 2] - R[2, 0]) / s
+        x = (R[0, 1] + R[1, 0]) / s
+        y = 0.25 * s
+        z = (R[1, 2] + R[2, 1]) / s
+    else:
+        s = np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1]) * 2.0
+        w = (R[1, 0] - R[0, 1]) / s
+        x = (R[0, 2] + R[2, 0]) / s
+        y = (R[1, 2] + R[2, 1]) / s
+        z = 0.25 * s
+    q = np.array([w, x, y, z], dtype=float)
+    return q / (np.linalg.norm(q) + 1e-12)
+
+
+def pose_from_pos_quat(pos, quat) -> Array:
+    """Assemble a 4x4 transform from a position and a scalar-first quaternion."""
+    return make_transform(quat_to_mat(quat), pos)

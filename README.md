@@ -37,8 +37,8 @@ src/deepussim/
   sim/               Genesis scene: Franka + phantom, contact force, trajectory (lazy import)
   pipeline/          pose sampling + scale-up dataset generation
 configs/             renderer / phantom / trajectory parameters
-scripts/             run_scaleup.py, run_real_collection.py, make_synthetic_phantom.py
-tests/               geometry / reslice / renderer unit tests
+scripts/             run_scaleup.py, run_real_collection.py, make_synthetic_phantom.py, smoke_sim.py
+tests/               geometry / quaternion / reslice / renderer unit tests
 ```
 
 ## Setup
@@ -49,8 +49,17 @@ Genesis (`genesis-world`) supports **Python 3.10–3.12** (not 3.13). Use a cond
 conda create -n deepussim python=3.11 -y
 conda activate deepussim
 pip install -e ".[dev]"
+# Genesis does NOT bundle torch — install it explicitly. On Linux the default wheel
+# is the CUDA build (verified: torch 2.12.0+cu130 on an RTX 4060):
+pip install torch
 # pin the resolved Genesis version afterwards:
 pip freeze | grep genesis-world
+```
+
+Verify the sim end-to-end (needs a GPU; ~60s to compile kernels on first run):
+
+```bash
+python scripts/smoke_sim.py   # Franka presses the phantom; prints contact force + pose
 ```
 
 The geometric core (`geometry`, `us.reslice`, `us.renderer`, `calib.registration`)
@@ -68,7 +77,15 @@ pytest -q
 
 ## Status
 
-Scaffold. Runnable: geometry, reslice, renderer (first-pass acoustic model), rigid
-registration, no-sim scale-up. Skeletons pending implementation: `sim.scene` (verify
-against your installed Genesis API), `calib.renderer_fit` (loss is runnable; optimiser
-choice TBD), real hardware capture.
+Runnable + verified: geometry (incl. quaternions), reslice, renderer (first-pass
+acoustic model), rigid registration, no-sim scale-up, and `sim.scene` — Franka presses
+a phantom on the GPU and reports contact force + probe pose (Genesis 0.4.7).
+
+Not yet wired / pending:
+- **sim -> reslice frame bridge**: `scene.probe_pose()` is in sim metres/world; mapping
+  to CBCT mm via the phantom-placement transform is not done (see scene.py docstring).
+- **phantom mesh from CBCT**: sim phantom is a rigid Box by default; extracting the CBCT
+  surface (marching cubes) to a collision mesh would align contact with the reslice.
+- **force servoing**: contact is rigid PD press (forces can be large); servo to a
+  realistic target force later.
+- `calib.renderer_fit` optimiser choice; real hardware capture; tissue deformation.
