@@ -19,12 +19,8 @@ def main() -> None:
     cfg = SceneConfig(
         backend="gpu",
         show_viewer=True,
-        franka_pos=(0.0, 0.0, 0.30),     # arm raised on a pedestal (ESTIMATE; real value tomorrow)
-        pedestal=True,
         phantom_pos=(0.45, 0.0, 0.04),
         phantom_size=(0.2, 0.2, 0.08),
-        camera_pos=(1.6, -1.2, 1.0),
-        camera_lookat=(0.45, 0.0, 0.2),
     )
     scene = UltrasoundScene(cfg).build()
     scene.reset()
