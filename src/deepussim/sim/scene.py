@@ -61,7 +61,7 @@ class SceneConfig:
     phantom_size: tuple[float, float, float] = (0.2, 0.2, 0.08)  # box phantom (m)
     phantom_pos: tuple[float, float, float] = (0.55, 0.0, 0.04)  # within reach (m)
     dt: float = 1e-2
-    show_viewer: bool = False
+    show_viewer: bool = True   # default: NOT headless — pass show_viewer=False for batch
     camera_pos: tuple[float, float, float] = (1.4, -1.0, 0.9)   # viewer camera (m)
     camera_lookat: tuple[float, float, float] = (0.45, 0.0, 0.1)
     camera_fov: float = 40.0

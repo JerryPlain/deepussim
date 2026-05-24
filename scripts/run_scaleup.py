@@ -42,6 +42,8 @@ def main() -> None:
     ap.add_argument("--out", required=True, help="output dataset directory")
     ap.add_argument("--n", type=int, default=64, help="number of poses to sample")
     ap.add_argument("--sim", action="store_true", help="drive a Genesis scene")
+    ap.add_argument("--headless", action="store_true",
+                    help="run the sim without the viewer window (default: viewer on)")
     args = ap.parse_args()
 
     volume = load_nifti(args.volume)
@@ -67,7 +69,8 @@ def main() -> None:
     from deepussim.geometry import from_translation
     from deepussim.calib.placement import align_points_placement
 
-    cfg = SceneConfig(probe_offset=from_translation([0.0, 0.0, 0.11]))  # hand->probe face (m)
+    cfg = SceneConfig(probe_offset=from_translation([0.0, 0.0, 0.11]),  # hand->probe face (m)
+                      show_viewer=not args.headless)
     scene = UltrasoundScene(cfg).build()
     scene.reset()
 
