@@ -168,6 +168,28 @@ class UltrasoundScene:
         for _ in range(int(n)):
             self._scene.step()
 
+    def servo_to_contact(self, T_world_from_probe: np.ndarray, backoff: float = 0.10,
+                         approach_steps: int = 150, press_steps: int = 250,
+                         threshold_n: float = 0.5) -> bool:
+        """Approach the target from above, then press until contact (or give up).
+
+        A one-shot IK move from the home pose to a far pressing target tends to stall;
+        moving to an offset *approach* pose first (backed off along the probe's axial
+        +z, away from the tissue) and then descending gives the controller a clear path.
+        Returns whether contact above ``threshold_n`` was reached.
+        """
+        T = np.asarray(T_world_from_probe, dtype=float)
+        T_approach = T.copy()
+        T_approach[:3, 3] = T[:3, 3] - backoff * T[:3, 2]  # back off along -axial (up)
+        self.set_probe_pose(T_approach)
+        self.step(approach_steps)
+        self.set_probe_pose(T)
+        for _ in range(press_steps):
+            self.step(1)
+            if self.in_contact(threshold_n):
+                break
+        return self.in_contact(threshold_n)
+
     # --- readouts ---------------------------------------------------------
     def probe_pose(self) -> np.ndarray:
         """Achieved sim-world probe pose as 4x4 = T_world_from_ee @ T_ee_from_probe."""

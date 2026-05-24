@@ -78,14 +78,25 @@ pytest -q
 ## Status
 
 Runnable + verified: geometry (incl. quaternions), reslice, renderer (first-pass
-acoustic model), rigid registration, no-sim scale-up, and `sim.scene` — Franka presses
-a phantom on the GPU and reports contact force + probe pose (Genesis 0.4.7).
+acoustic model), rigid registration, no-sim scale-up, `sim.scene` (Franka presses a
+phantom on the GPU, Genesis 0.4.7), **and the full closed loop** — `run_scaleup --sim`
+drives the arm, presses the phantom, bridges each achieved pose into the CBCT frame
+(`calib.placement`), and reslices to (US image + anatomy mask + contact force).
+
+Closed loop:
+
+```bash
+python scripts/run_scaleup.py --volume data/phantom/intensity.nii.gz \
+    --labels data/phantom/labels.nii.gz --config configs/renderer.yaml \
+    --out data/sim_ds --n 16 --sim     # poses driven by physics, masks from CBCT labels
+```
 
 Not yet wired / pending:
-- **sim -> reslice frame bridge**: `scene.probe_pose()` is in sim metres/world; mapping
-  to CBCT mm via the phantom-placement transform is not done (see scene.py docstring).
 - **phantom mesh from CBCT**: sim phantom is a rigid Box by default; extracting the CBCT
-  surface (marching cubes) to a collision mesh would align contact with the reslice.
-- **force servoing**: contact is rigid PD press (forces can be large); servo to a
-  realistic target force later.
+  surface (marching cubes) to a collision mesh would align contact with the reslice and
+  remove the hand-tuned placement anchors in run_scaleup.py.
+- **force servoing**: contact is a rigid PD press, so reported forces are large/unphysical
+  (~10^2–10^3 N); servo to a realistic target force (~few N) for usable force labels.
+- **placement from fiducials**: `calib.placement` builds `T_cbct_from_simworld` from a
+  chosen anchor pair for the demo; for real data estimate it with `calib.registration`.
 - `calib.renderer_fit` optimiser choice; real hardware capture; tissue deformation.
