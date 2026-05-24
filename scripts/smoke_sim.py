@@ -38,7 +38,7 @@ def main() -> None:
 
     f = scene.contact_force()
     p = scene.probe_pose()
-    print("contacted at hand-z (m):", None if contacted_at is None else round(contacted_at, 3))
+    print("contacted at probe-z (m):", None if contacted_at is None else round(contacted_at, 3))
     print("contact force (N)      :", np.round(f, 3), "| |f| =", round(float(np.linalg.norm(f)), 2))
     print("in_contact             :", scene.in_contact(threshold_n=0.5))
     print("probe pos (m)          :", np.round(p[:3, 3], 4))

@@ -33,13 +33,23 @@ src/deepussim/
   geometry.py        SE(3) transforms (Step 3 math primitives)
   data/              CBCT / label volume IO, dataset records
   us/                reslice + US image-formation renderer (calibration params live here)
-  calib/             point-based rigid registration + renderer parameter fitting
-  sim/               Genesis scene: Franka + phantom, contact force, trajectory (lazy import)
+  calib/             point-based rigid registration + renderer parameter fitting + sim->CBCT placement
+  sim/               Genesis scene: FR3 + phantom, contact force, trajectory (lazy import)
+  assets/franka_fr3/ vendored Franka Research 3 MJCF + meshes (MuJoCo Menagerie)
   pipeline/          pose sampling + scale-up dataset generation
 configs/             renderer / phantom / trajectory parameters
-scripts/             run_scaleup.py, run_real_collection.py, make_synthetic_phantom.py, smoke_sim.py
-tests/               geometry / quaternion / reslice / renderer unit tests
+scripts/             run_scaleup.py, run_real_collection.py, make_synthetic_phantom.py, smoke_sim.py, view_sim.py
+tests/               geometry / quaternion / reslice / renderer / placement unit tests
 ```
+
+## Robot model
+
+The sim uses the **Franka Research 3 (FR3)** — the real hardware — vendored from the
+[MuJoCo Menagerie](https://github.com/google-deepmind/mujoco_menagerie) `franka_fr3`
+model (Apache-2.0, license kept under `src/deepussim/assets/franka_fr3/`). Genesis only
+bundles the older Panda; FR3 differs in joint limits, dynamics, and meshes. The FR3
+model has no gripper — it ends at the `fr3_link7` flange with an attachment site 0.107 m
+out, which is where a US probe mounts (`SceneConfig.probe_offset`).
 
 ## Setup
 

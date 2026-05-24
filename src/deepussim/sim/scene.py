@@ -18,6 +18,7 @@ on genesis-world; if you upgrade and a name moves, the call sites are localised 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -49,14 +50,21 @@ def _np(x) -> np.ndarray:
     return np.asarray(x)
 
 
-# Franka Panda home configuration (7 arm joints + 2 fingers).
-_FRANKA_HOME = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04])
+# Vendored Franka Research 3 (FR3) model — MuJoCo Menagerie, matches the real hardware.
+# (Genesis bundles only the older Panda; FR3 differs in joint limits / dynamics / meshes.)
+def _fr3_mjcf_path() -> str:
+    return str(Path(__file__).resolve().parents[1] / "assets" / "franka_fr3" / "fr3.xml")
+
+
+# FR3 home keyframe from the model (7 arm joints, no gripper). Joints 4/6 ranges exclude
+# 0, so this model-provided pose must be used rather than an all-zeros qpos.
+_FR3_HOME = np.array([0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853])
 
 
 @dataclass
 class SceneConfig:
     backend: str = "gpu"                  # "gpu" | "cpu"
-    franka_mjcf: str = "xml/franka_emika_panda/panda.xml"  # Genesis bundled asset
+    franka_mjcf: str = field(default_factory=_fr3_mjcf_path)  # vendored FR3 MJCF
     phantom_mesh: str | None = None       # surface mesh (m); None -> a Box phantom
     phantom_size: tuple[float, float, float] = (0.2, 0.2, 0.08)  # box phantom (m)
     phantom_pos: tuple[float, float, float] = (0.55, 0.0, 0.04)  # within reach (m)
@@ -65,11 +73,12 @@ class SceneConfig:
     camera_pos: tuple[float, float, float] = (1.4, -1.0, 0.9)   # viewer camera (m)
     camera_lookat: tuple[float, float, float] = (0.45, 0.0, 0.1)
     camera_fov: float = 40.0
-    ee_link_name: str = "hand"
+    ee_link_name: str = "fr3_link7"       # FR3 flange (no "hand"; probe mounts here)
     n_arm_dofs: int = 7
-    # T_ee_from_probe: hand-eye offset placing the US image plane relative to the EE.
+    # T_ee_from_probe: maps the FR3 flange (link7) to the US image plane. The model's
+    # attachment_site sits at +0.107 m on link7 z — set this to your probe's mount/length.
     probe_offset: np.ndarray = field(default_factory=lambda: np.eye(4))
-    home_qpos: np.ndarray = field(default_factory=lambda: _FRANKA_HOME.copy())
+    home_qpos: np.ndarray = field(default_factory=lambda: _FR3_HOME.copy())
 
 
 class UltrasoundScene:

@@ -69,7 +69,7 @@ def main() -> None:
     from deepussim.geometry import from_translation
     from deepussim.calib.placement import align_points_placement
 
-    cfg = SceneConfig(probe_offset=from_translation([0.0, 0.0, 0.11]),  # hand->probe face (m)
+    cfg = SceneConfig(probe_offset=from_translation([0.0, 0.0, 0.11]),  # flange->probe (m); FR3 mount ~0.107
                       show_viewer=not args.headless)
     scene = UltrasoundScene(cfg).build()
     scene.reset()
