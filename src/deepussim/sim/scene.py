@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from ..geometry import pose_from_pos_quat, mat_to_quat, invert, compose
+from ..geometry import pose_from_pos_quat, mat_to_quat, invert, compose, from_translation
 
 _GS_INITIALIZED = False
 
@@ -75,9 +75,14 @@ class SceneConfig:
     camera_fov: float = 40.0
     ee_link_name: str = "fr3_link7"       # FR3 flange (no "hand"; probe mounts here)
     n_arm_dofs: int = 7
-    # T_ee_from_probe: maps the FR3 flange (link7) to the US image plane. The model's
-    # attachment_site sits at +0.107 m on link7 z — set this to your probe's mount/length.
-    probe_offset: np.ndarray = field(default_factory=lambda: np.eye(4))
+    # Base placement (where the arm is bolted). ESTIMATE; set from the real workstation.
+    franka_pos: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    franka_euler: tuple[float, float, float] = (0.0, 0.0, 0.0)   # radians, MJCF order
+    pedestal: bool = False                # add a visual column under the base (for mounts)
+    # T_ee_from_probe: maps the FR3 flange (link7) to the US image plane. Default = the
+    # placeholder probe tip in fr3.xml (~0.18 m on link7 z). ESTIMATE — set to the real
+    # probe/fixture once measured (hand-eye).
+    probe_offset: np.ndarray = field(default_factory=lambda: from_translation([0.0, 0.0, 0.18]))
     home_qpos: np.ndarray = field(default_factory=lambda: _FR3_HOME.copy())
 
 
@@ -140,7 +145,19 @@ class UltrasoundScene:
                               fixed=True)
             )
 
-        self._franka = self._scene.add_entity(gs.morphs.MJCF(file=self.cfg.franka_mjcf))
+        # Optional visual pedestal/column under the base (for column-mounted setups).
+        if self.cfg.pedestal and self.cfg.franka_pos[2] > 0:
+            h = self.cfg.franka_pos[2]
+            self._scene.add_entity(
+                gs.morphs.Box(size=(0.18, 0.18, h),
+                              pos=(self.cfg.franka_pos[0], self.cfg.franka_pos[1], h / 2),
+                              fixed=True)
+            )
+
+        self._franka = self._scene.add_entity(
+            gs.morphs.MJCF(file=self.cfg.franka_mjcf, pos=self.cfg.franka_pos,
+                           euler=self.cfg.franka_euler)
+        )
         self._scene.build()
 
         self._ee_link = self._franka.get_link(self.cfg.ee_link_name)

@@ -66,11 +66,10 @@ def main() -> None:
     # Sim path: poses are nominal probe targets in the sim world (metres); physics gives
     # the achieved pose + contact force, then the placement bridge maps it into CBCT mm.
     from deepussim.sim.scene import UltrasoundScene, SceneConfig
-    from deepussim.geometry import from_translation
     from deepussim.calib.placement import align_points_placement
 
-    cfg = SceneConfig(probe_offset=from_translation([0.0, 0.0, 0.11]),  # flange->probe (m); FR3 mount ~0.107
-                      show_viewer=not args.headless)
+    # probe_offset defaults to the placeholder probe tip on the FR3 flange (see SceneConfig).
+    cfg = SceneConfig(show_viewer=not args.headless)
     scene = UltrasoundScene(cfg).build()
     scene.reset()
 

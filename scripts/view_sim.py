@@ -19,14 +19,18 @@ def main() -> None:
     cfg = SceneConfig(
         backend="gpu",
         show_viewer=True,
+        franka_pos=(0.0, 0.0, 0.30),     # arm raised on a pedestal (ESTIMATE; real value tomorrow)
+        pedestal=True,
         phantom_pos=(0.45, 0.0, 0.04),
         phantom_size=(0.2, 0.2, 0.08),
+        camera_pos=(1.6, -1.2, 1.0),
+        camera_lookat=(0.45, 0.0, 0.2),
     )
     scene = UltrasoundScene(cfg).build()
     scene.reset()
 
     down = [0.0, 1.0, 0.0, 0.0]          # probe pointing straight down
-    press_z = 0.19                        # hand-z that contacts the box top (~0.08 m)
+    press_z = 0.07                        # probe-tip target: just into the box top (~0.08 m)
     xs = np.concatenate([np.linspace(0.36, 0.54, 60),    # sweep across the phantom
                          np.linspace(0.54, 0.36, 60)])
 

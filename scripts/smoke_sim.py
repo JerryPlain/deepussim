@@ -27,9 +27,9 @@ def main() -> None:
     scene.set_probe_pose(pose_from_pos_quat([0.45, 0.0, 0.30], down))
     scene.step(80)
 
-    # Descend until the probe presses the phantom.
+    # Descend until the probe tip presses the phantom (box top ~0.08 m).
     contacted_at = None
-    for z in np.arange(0.28, 0.10, -0.01):
+    for z in np.arange(0.28, 0.04, -0.01):
         scene.set_probe_pose(pose_from_pos_quat([0.45, 0.0, float(z)], down))
         scene.step(25)
         if scene.in_contact(threshold_n=0.5):

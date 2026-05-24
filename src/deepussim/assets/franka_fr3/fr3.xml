@@ -137,6 +137,13 @@
                       <geom mesh="link7_3" material="black" class="visual"/>
                       <geom name="fr3_link7_collision" class="collision" mesh="link7_coll"/>
                       <site name="attachment_site" pos="0 0 0.107"/>
+                      <!-- deepussim: PLACEHOLDER US probe rigidly mounted at the flange
+                           attachment site. Dimensions are an ESTIMATE — replace with the
+                           real probe + fixture geometry. Tip (contacting point) ~z=0.18. -->
+                      <geom name="us_probe_visual" class="visual" type="cylinder"
+                            fromto="0 0 0.107 0 0 0.18" size="0.018" material="black"/>
+                      <geom name="us_probe_collision" class="collision" type="cylinder"
+                            fromto="0 0 0.107 0 0 0.18" size="0.018"/>
                     </body>
                   </body>
                 </body>
