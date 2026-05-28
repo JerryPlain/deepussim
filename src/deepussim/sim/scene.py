@@ -53,7 +53,20 @@ def _np(x) -> np.ndarray:
 # Vendored Franka Research 3 (FR3) model — MuJoCo Menagerie, matches the real hardware.
 # (Genesis bundles only the older Panda; FR3 differs in joint limits / dynamics / meshes.)
 def _fr3_mjcf_path() -> str:
-    return str(Path(__file__).resolve().parents[1] / "assets" / "franka_fr3" / "fr3.xml")
+    original = Path(__file__).resolve().parents[1] / "assets" / "franka_fr3" / "fr3.xml"
+    try:
+        str(original).encode("ascii")
+        return str(original)
+    except UnicodeEncodeError:
+        # Path contains non-ASCII characters (e.g., CJK) — MuJoCo's C library can't
+        # resolve relative mesh paths through them on Windows.  Copy the entire
+        # franka_fr3 directory to a temp location with a plain ASCII path once.
+        import shutil
+        import tempfile
+        tmp = Path(tempfile.gettempdir()) / "deepussim_assets" / "franka_fr3"
+        if not (tmp / "fr3.xml").exists():
+            shutil.copytree(original.parent, tmp, dirs_exist_ok=True)
+        return str(tmp / "fr3.xml")
 
 
 # FR3 home keyframe from the model (7 arm joints, no gripper). Joints 4/6 ranges exclude
@@ -68,6 +81,7 @@ class SceneConfig:
     phantom_mesh: str | None = None       # surface mesh (m); None -> a Box phantom
     phantom_size: tuple[float, float, float] = (0.2, 0.2, 0.08)  # box phantom (m)
     phantom_pos: tuple[float, float, float] = (0.55, 0.0, 0.04)  # within reach (m)
+    phantom_quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)  # wxyz
     dt: float = 1e-2
     show_viewer: bool = True   # default: NOT headless — pass show_viewer=False for batch
     camera_pos: tuple[float, float, float] = (1.4, -1.0, 0.9)   # viewer camera (m)
@@ -133,11 +147,14 @@ class UltrasoundScene:
         if self.cfg.phantom_mesh:
             self._phantom = self._scene.add_entity(
                 gs.morphs.Mesh(file=self.cfg.phantom_mesh, fixed=True,
-                               pos=self.cfg.phantom_pos)
+                               pos=self.cfg.phantom_pos,
+                               quat=self.cfg.phantom_quat,
+                               align=False)
             )
         else:
             self._phantom = self._scene.add_entity(
                 gs.morphs.Box(size=self.cfg.phantom_size, pos=self.cfg.phantom_pos,
+                              quat=self.cfg.phantom_quat,
                               fixed=True)
             )
 
