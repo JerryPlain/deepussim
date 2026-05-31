@@ -6,7 +6,7 @@ This file tracks meaningful repository changes.
 
 ## 2026-05-31 — Document data layout & out-of-band sharing
 
-**Commits:** _working tree (not yet committed)_
+**Commits:** `1f302bf`
 
 ### docs
 
