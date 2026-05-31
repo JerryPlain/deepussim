@@ -4,6 +4,20 @@ This file tracks meaningful repository changes.
 
 ## [Unreleased]
 
+## 2026-05-31 — Rewrite README to the two-stage pipeline (paper-standard)
+
+**Commits:** `00e8e50`
+
+### docs
+
+- Reframed `README.md` around the research question (is a pretrained US foundation-model
+  encoder a more robust representation than from-scratch) and the two-stage real-to-sim /
+  sim-to-real structure, replacing the earlier single-flow description.
+- Added a rendered **Mermaid** pipeline figure, the formal US-pixel → CBCT-voxel transform
+  chain with a per-segment provenance table, the design invariants (free masks, force from
+  physics, mesh ≠ volume, the three-models distinction, dark-frame tagging), and the open
+  `E_T_U` H1/H2 direction question. Updated Layout and Status to the current real-data state.
+
 ## 2026-05-31 — Document data layout & out-of-band sharing
 
 **Commits:** `1f302bf`
