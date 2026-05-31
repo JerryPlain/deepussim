@@ -4,6 +4,18 @@ This file tracks meaningful repository changes.
 
 ## [Unreleased]
 
+## 2026-05-31 — Document data layout & out-of-band sharing
+
+**Commits:** _working tree (not yet committed)_
+
+### docs
+
+- Added `docs/data_layout.md`: the `data/` tree, where each asset comes from (raw inputs +
+  probe mesh on the shared Google Drive; intensity/label/surface derived in 3D Slicer), and
+  how to reproduce every derived asset from raw inputs. Data stays out of git — the rosbags
+  and the 122 MB intensity volume exceed GitHub's 100 MB per-file limit — so teammates
+  assemble `data/` locally from the Drive folder.
+
 ## 2026-05-31 — Real-data ingestion: rosbags, calibration transforms, NRRD volumes
 
 **Commits:** `7298d94`
