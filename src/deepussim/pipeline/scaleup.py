@@ -59,13 +59,17 @@ def generate_dataset(
             pass
 
     with DatasetWriter(out_dir, meta={"geometry": geom.__dict__}) as writer:
-        for idx, T_nominal in enumerate(iterator):
+        # for each candidate pose, drive the sim (if given), reslice, render, and write a Sample
+        for idx, T_nominal in enumerate(iterator): 
             force = None
             meta = {"index": idx, "source": "sim" if scene is not None else "reslice"}
+            # default reslice pose is the nominal target (sim world, m) mapped into CBCT (mm) if sim given, else just the pose (CBCT, mm)
             reslice_pose = np.asarray(T_nominal, dtype=float)
 
             if scene is not None:
-                T_nom = np.asarray(T_nominal, dtype=float)
+                T_nom = np.asarray(T_nominal, dtype=float) # if sim: nominal target pose in sim world (m)
+                
+                # move the sim probe there, check contact, get the achieved pose + force from the sim physics 
                 if hasattr(scene, "servo_to_contact"):
                     contacted = scene.servo_to_contact(T_nom)
                 else:
@@ -74,18 +78,28 @@ def generate_dataset(
                     contacted = scene.in_contact()
                 if not contacted:
                     continue  # unreachable / no contact -> drop
-                pose_sim = scene.probe_pose()                     # sim world, metres
-                force = scene.contact_force()
+        
+                pose_sim = scene.probe_pose() # achieved probe pose in sim world (m)
+                force = scene.contact_force() # Newtons, if available (else None)
                 reslice_pose = sim_pose_to_cbct(pose_sim, sim_to_cbct)  # CBCT, mm
                 meta["pose_sim_m"] = pose_sim.tolist()
+            
+            # reslice + render the US image at the reslice pose, and the label mask if given
+            intensity = reslice_volume(volume, reslice_pose, geom, order=1) # get a 2D slice of the intensity volume at the reslice pose
+            image = render(intensity, geom, params) # render the resliced intensity into a US image (with depth-dependent brightness, etc)
 
-            intensity = reslice_volume(volume, reslice_pose, geom, order=1)
-            image = render(intensity, geom, params)
-
+            # reslice the label volume at the same pose, if given, to get a mask of the anatomy visible in the image (nearest-neighbour to preserve discrete labels)
             mask = None
             if label_volume is not None:
                 mask = reslice_volume(volume=label_volume, T_world_from_probe=reslice_pose,
                                       geom=geom, order=0).astype(np.int16)
+            
+            # save the Sample: image, pose, mask, force, and metadata (including sim vs reslice source and sim pose if from sim)
+            # - force: from sim physics, if available (else None)
+            # - image: rendered from the resliced intensity volume
+            # - pose: the reslice pose in CBCT frame (mm) — this is the "ground truth" for learning, and is the nominal target pose mapped into CBCT if from sim, else just the pose if from reslice 
+            # - mask: resliced from the label volume at the same pose, if given (else None)
+            # - meta: at least the index and source; if from sim also the achieved sim pose in metres for reference
 
             writer.add(Sample(image=image, pose=reslice_pose, mask=mask,
                               force=force, meta=meta))
