@@ -6,7 +6,7 @@ This file tracks meaningful repository changes.
 
 ## 2026-05-31 — Real-data ingestion: rosbags, calibration transforms, NRRD volumes
 
-**Commits:** `df6aff8`
+**Commits:** `7298d94`
 
 ### data — real US sequence extraction
 
