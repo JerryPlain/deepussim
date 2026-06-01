@@ -4,6 +4,23 @@ This file tracks meaningful repository changes.
 
 ## [Unreleased]
 
+## 2026-06-01 — Multi-line raster trajectory for area-coverage scale-up
+
+**Commits:** `51e873d`
+
+### pipeline / scripts
+
+- Added `pipeline.sampling.surface_raster`: covers a patch of the phantom's top surface with
+  `n_lines` parallel `surface_sweep`s of `n_per_line` poses each, stepping across the
+  perpendicular in-plane axis and alternating direction (serpentine) for a continuous
+  lawnmower path; the KD-tree is built once and shared. Factored the per-guide pose logic out
+  of `surface_sweep` so both share it. **[API]**
+- Wired into `run_scaleup.py` as `--trajectory raster` (`--lines` / `--per-line` /
+  `--cross-frac`), so one command generates an area-covering geometric dataset.
+- Verified on the real phantom: 120 poses cover ~208×113 mm, all resting at the standoff with
+  axial · inward-normal ≈ 1.0. Grows the geometry branch from a single line to a
+  density-controlled patch; trajectories are reused once the learned renderer lands.
+
 ## 2026-06-01 — Curvilinear (convex) probe geometry; drop the linear model
 
 **Commits:** `02c611f`
