@@ -4,6 +4,40 @@ This file tracks meaningful repository changes.
 
 ## [Unreleased]
 
+## 2026-05-31 — Surface-constrained trajectory + wire into scale-up
+
+**Commits:** `0803d4f`
+
+### pipeline / scripts
+
+- Added `pipeline.sampling.surface_sweep` (+ `top_sweep_endpoints`): the real trajectory
+  generator. It constrains poses to the phantom surface mesh — sample a point, estimate a
+  PCA-smoothed normal (robust to the threshold mesh's staircase noise), rest the probe on the
+  surface with the axial axis pointing inward, and order the points into a scan path. **[API]**
+- Wired it into `run_scaleup.py` as `--trajectory surface --mesh <stl>`, and switched volume
+  loading to `load_volume` so the real `.nrrd` assets load (the old `load_nifti` could not).
+  **[BREAKING]** for the script's volume-format assumption.
+- Verified on the real phantom: poses sit exactly at the standoff, axial · inward-normal
+  ≥ 0.998, and reslicing produces anatomy-bearing slices with free aligned masks. This closes
+  the pipeline's geometry branch (Assets → Trajectory → reslice).
+
+## 2026-05-31 — Resolve hand-eye/placement by replay; drop H1/H2 naming
+
+**Commits:** `0803d4f`
+
+### calib / scripts
+
+- Added `scripts/verify_replay.py`: a Genesis-free geometric check that drives the probe along
+  the real rosbag poses and measures its distance to the phantom surface. It resolves the two
+  ambiguous calibration directions — contact frames land ~1–3 cm on the surface and dark frames
+  13–21 cm off (lift-off), on both sequences, vs 0.17–0.76 m for every alternative.
+- **[API]** `calib.transforms` now encodes the resolved result with directionally accurate
+  names instead of H1/H2 hypotheses: `T_PROBE_FROM_EE` (the delivered hand-eye matrix),
+  `T_EE_FROM_PROBE` (its inverse — the probe mount the chain uses), and `T_WORLD_FROM_CBCT`
+  (the delivered placement, applied directly as CBCT→world). Removed the `ETU`/`probe_offset`
+  hypothesis API.
+- Removed informal personal attributions from code and docs (neutral "as delivered" wording).
+
 ## 2026-05-31 — Rewrite README to the two-stage pipeline (paper-standard)
 
 **Commits:** `00e8e50`
