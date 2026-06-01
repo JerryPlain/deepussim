@@ -86,6 +86,21 @@ def _smoothed_normal(tree, vertices, point, radius, n_fallback=30):
     return n / (np.linalg.norm(n) + 1e-12)
 
 
+def _pose_from_guide(tree, V, guide, sweep_dir, standoff_mm, smooth_radius_mm) -> np.ndarray:
+    """One surface pose for a guide point: project to the surface, smooth normal, rest probe."""
+    surface_pt = V[tree.query(guide)[1]]
+    normal = _smoothed_normal(tree, V, surface_pt, smooth_radius_mm)
+    if normal @ (guide - surface_pt) < 0:  # orient outward (toward the guide point)
+        normal = -normal
+    return _pose_on_surface(surface_pt, normal, sweep_dir, standoff_mm)
+
+
+def _line_poses(tree, V, start, end, n, standoff_mm, smooth_radius_mm) -> list[np.ndarray]:
+    sweep_dir = end - start
+    return [_pose_from_guide(tree, V, start + t * sweep_dir, sweep_dir, standoff_mm,
+                             smooth_radius_mm) for t in np.linspace(0.0, 1.0, n)]
+
+
 def surface_sweep(mesh, start, end, n: int, standoff_mm: float = 2.0,
                   smooth_radius_mm: float = 8.0) -> list[np.ndarray]:
     """``n`` probe poses (``T_cbct_from_probe``, mm) gliding along the phantom surface.
@@ -100,18 +115,44 @@ def surface_sweep(mesh, start, end, n: int, standoff_mm: float = 2.0,
 
     V = np.asarray(mesh.vertices, dtype=float)
     tree = cKDTree(V)
-    start = np.asarray(start, dtype=float)
-    end = np.asarray(end, dtype=float)
-    sweep_dir = end - start
+    return _line_poses(tree, V, np.asarray(start, float), np.asarray(end, float),
+                       n, standoff_mm, smooth_radius_mm)
 
-    poses = []
-    for t in np.linspace(0.0, 1.0, n):
-        guide = start + t * sweep_dir
-        surface_pt = V[tree.query(guide)[1]]
-        normal = _smoothed_normal(tree, V, surface_pt, smooth_radius_mm)
-        if normal @ (guide - surface_pt) < 0:  # orient outward (toward the guide point)
-            normal = -normal
-        poses.append(_pose_on_surface(surface_pt, normal, sweep_dir, standoff_mm))
+
+def surface_raster(mesh, axis: int = 0, span_frac: float = 0.6, cross_frac: float = 0.4,
+                   n_lines: int = 5, n_per_line: int = 24, standoff_mm: float = 2.0,
+                   smooth_radius_mm: float = 8.0, serpentine: bool = True,
+                   clearance_mm: float = 20.0) -> list[np.ndarray]:
+    """Cover a patch of the phantom's +z-top with ``n_lines`` parallel surface sweeps.
+
+    Sweeps run along ``axis`` (0=x, 1=y) spanning ``span_frac`` of that extent, stepped across
+    the other in-plane axis over ``cross_frac`` of its extent in ``n_lines`` lines of
+    ``n_per_line`` poses each. With ``serpentine`` the lines alternate direction so the pose
+    stream is a continuous lawnmower path. The KD-tree is built once and shared across lines.
+    Returns ``n_lines * n_per_line`` poses (``T_cbct_from_probe``, mm) in scan order.
+    """
+    from scipy.spatial import cKDTree
+
+    V = np.asarray(mesh.vertices, dtype=float)
+    tree = cKDTree(V)
+    lo, hi = np.asarray(mesh.bounds, dtype=float)
+    centre = (lo + hi) / 2.0
+    cross_axis = 1 - axis  # the other in-plane horizontal axis (0<->1); up is z (axis 2)
+    half_along = (hi[axis] - lo[axis]) * span_frac / 2.0
+    half_cross = (hi[cross_axis] - lo[cross_axis]) * cross_frac / 2.0
+    z_top = hi[2] + clearance_mm
+    cross_offsets = np.linspace(-half_cross, half_cross, n_lines) if n_lines > 1 else [0.0]
+
+    poses: list[np.ndarray] = []
+    for j, c in enumerate(cross_offsets):
+        start = centre.copy(); end = centre.copy()
+        start[2] = end[2] = z_top
+        start[axis], end[axis] = centre[axis] - half_along, centre[axis] + half_along
+        start[cross_axis] = end[cross_axis] = centre[cross_axis] + c
+        line = _line_poses(tree, V, start, end, n_per_line, standoff_mm, smooth_radius_mm)
+        if serpentine and j % 2 == 1:
+            line = line[::-1]
+        poses.extend(line)
     return poses
 
 

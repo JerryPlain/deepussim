@@ -21,7 +21,9 @@ import yaml
 from deepussim.data.volume import load_volume
 from deepussim.us.reslice import ProbeGeometry
 from deepussim.us.renderer import RendererParams
-from deepussim.pipeline.sampling import linear_sweep, surface_sweep, top_sweep_endpoints
+from deepussim.pipeline.sampling import (
+    linear_sweep, surface_sweep, surface_raster, top_sweep_endpoints,
+)
 from deepussim.pipeline.scaleup import generate_dataset
 
 
@@ -36,11 +38,15 @@ def load_config(path: str | None):
 
 def nosim_poses(args, volume):
     """Probe poses in the CBCT mm frame for the no-sim reslice path."""
-    if args.trajectory == "surface":
+    if args.trajectory in ("surface", "raster"):
         if not args.mesh:
-            raise SystemExit("--trajectory surface requires --mesh (phantom surface STL, CBCT mm)")
+            raise SystemExit(f"--trajectory {args.trajectory} requires --mesh (phantom STL, CBCT mm)")
         import trimesh
         mesh = trimesh.load(args.mesh)
+        if args.trajectory == "raster":
+            return surface_raster(mesh, axis=args.sweep_axis, span_frac=args.span_frac,
+                                  cross_frac=args.cross_frac, n_lines=args.lines,
+                                  n_per_line=args.per_line, standoff_mm=args.standoff_mm)
         start, end = top_sweep_endpoints(mesh, axis=args.sweep_axis, span_frac=args.span_frac)
         return surface_sweep(mesh, start, end, args.n, standoff_mm=args.standoff_mm)
     # center-sweep (default): a straight line across the volume centre, aimed -z.
@@ -58,12 +64,18 @@ def main() -> None:
     ap.add_argument("--config", help="renderer/geometry YAML (configs/renderer.yaml)")
     ap.add_argument("--out", required=True, help="output dataset directory")
     ap.add_argument("--n", type=int, default=64, help="number of poses to sample")
-    ap.add_argument("--trajectory", choices=["center-sweep", "surface"], default="center-sweep",
-                    help="no-sim pose source: straight sweep across the volume, or a "
-                         "surface-constrained glide over the phantom mesh (--mesh)")
-    ap.add_argument("--mesh", help="phantom surface STL (CBCT mm) for --trajectory surface")
+    ap.add_argument("--trajectory", choices=["center-sweep", "surface", "raster"],
+                    default="center-sweep",
+                    help="no-sim pose source: straight sweep across the volume, a single "
+                         "surface-constrained glide, or a multi-line raster over the phantom "
+                         "mesh (--mesh)")
+    ap.add_argument("--mesh", help="phantom surface STL (CBCT mm) for --trajectory surface/raster")
     ap.add_argument("--sweep-axis", type=int, default=0, help="surface sweep axis (0=x, 1=y)")
-    ap.add_argument("--span-frac", type=float, default=0.6, help="surface sweep span fraction")
+    ap.add_argument("--span-frac", type=float, default=0.6, help="along-sweep span fraction")
+    ap.add_argument("--cross-frac", type=float, default=0.4,
+                    help="raster: cross-sweep span fraction (coverage across lines)")
+    ap.add_argument("--lines", type=int, default=5, help="raster: number of parallel sweep lines")
+    ap.add_argument("--per-line", type=int, default=24, help="raster: poses per sweep line")
     ap.add_argument("--standoff-mm", type=float, default=2.0, help="probe standoff off the surface")
     ap.add_argument("--sim", action="store_true", help="drive a Genesis scene")
     ap.add_argument("--headless", action="store_true",

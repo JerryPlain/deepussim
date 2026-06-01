@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from deepussim.pipeline.sampling import linear_sweep, surface_sweep
+from deepussim.pipeline.sampling import linear_sweep, surface_sweep, surface_raster
 from deepussim.geometry import is_rigid
 
 
@@ -40,3 +40,20 @@ def test_surface_sweep_is_ordered_along_the_sweep():
     poses = surface_sweep(mesh, [-30, 0, 70], [30, 0, 70], n=6)
     xs = [T[0, 3] for T in poses]  # x increases monotonically along the sweep
     assert all(b >= a - 1e-6 for a, b in zip(xs, xs[1:]))
+
+
+def test_surface_raster_covers_a_2d_patch():
+    trimesh = pytest.importorskip("trimesh")
+    pytest.importorskip("scipy")
+    R, standoff = 50.0, 2.0
+    mesh = trimesh.creation.icosphere(subdivisions=3, radius=R)
+    poses = surface_raster(mesh, axis=0, span_frac=0.5, cross_frac=0.5,
+                           n_lines=4, n_per_line=5, standoff_mm=standoff)
+    assert len(poses) == 4 * 5
+    pos = np.array([T[:3, 3] for T in poses])
+    # coverage spreads over BOTH in-plane axes (not a single line)
+    assert np.ptp(pos[:, 0]) > 10.0 and np.ptp(pos[:, 1]) > 10.0
+    for T in poses:
+        p = T[:3, 3]
+        assert R - 1.0 < np.linalg.norm(p) < R + standoff + 2.0   # on the sphere + standoff
+        assert T[:3, 2] @ (-p / np.linalg.norm(p)) > 0.9          # axial points inward
