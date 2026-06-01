@@ -4,6 +4,46 @@ This file tracks meaningful repository changes.
 
 ## [Unreleased]
 
+## 2026-06-01 — Close the real-data sim loop (lying phantom, hand-eye, soft contact)
+
+**Commits:** `889b6b6`
+
+`run_scaleup --sim` now runs end-to-end on the real CBCT + rosbags: the FR3 replays the real
+probe sweep on the real phantom and writes (US image + pose + anatomy mask + contact force)
+with realistic ~few-N forces, non-blank images, and anatomy masks.
+
+### sim
+
+- **Probe-mount reconciliation.** `SceneConfig.probe_offset` is now
+  `trans(0,0,0.107) ∘ T_EE_FROM_PROBE` (link7→flange→transducer). IK drives `fr3_link7`, but
+  the rosbag pose and hand-eye are measured from the *flange* (link7 + 0.107 m); the bare
+  placeholder `[0,0,0.287]` missed real recorded poses by ~15 cm, the composed offset reaches
+  them to ~7 mm.
+- **[API]** `SceneConfig.phantom_scale` (mesh unit scale; `0.001` loads a mm mesh as metres)
+  and `SceneConfig.contact_timeconst` (rigid-contact compliance; soft tissue-like values give
+  realistic few-N forces instead of a rigid press's 10²–10³ N). `servo_to_force` settle bumped
+  for the compliant surface.
+
+### pipeline
+
+- **[API]** `generate_dataset(force_target_n=...)` routes the sim press through
+  `servo_to_force` (holds a target contact force) instead of `servo_to_contact`.
+
+### scripts
+
+- `run_scaleup --sim` rewritten: places the phantom **lying** (`T_WORLD_FROM_CBCT ∘ Rx(90°)`,
+  matching the rig and `view_sim.py`), seats it onto the real contact cloud, and **derives the
+  reslice bridge from the same transform** (round-trip 0.006 mm). Trajectory **replays** the
+  rosbag contact poses (reachable + on-surface by construction), subsampled to `--n`. New
+  flags: `--force-n`, `--bags`, `--contact-timeconst`.
+
+### docs
+
+- README: ordered **Reproduce** section (synthetic → real no-sim → real sim force channel);
+  updated probe-mount, force-from-physics, and status notes. Known gap recorded: on the soft
+  contact the probe indents deeper than physical (mm-indent-at-target needs a deformable
+  soft-body phantom or finer contact/servo tuning).
+
 ## 2026-06-01 — Real US probe in sim + contact-force servoing
 
 **Commits:** `993dce3`
