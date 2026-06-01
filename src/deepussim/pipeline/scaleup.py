@@ -33,6 +33,7 @@ def generate_dataset(
     scene=None,
     sim_to_cbct: np.ndarray | None = None,
     settle_steps: int = 50,
+    force_target_n: float | None = None,
     progress: bool = True,
 ) -> int:
     """Generate and write samples for ``poses``. Returns the number written.
@@ -69,8 +70,11 @@ def generate_dataset(
             if scene is not None:
                 T_nom = np.asarray(T_nominal, dtype=float) # if sim: nominal target pose in sim world (m)
                 
-                # move the sim probe there, check contact, get the achieved pose + force from the sim physics 
-                if hasattr(scene, "servo_to_contact"):
+                # move the sim probe there, check contact, get the achieved pose + force from the sim physics
+                if force_target_n is not None and hasattr(scene, "servo_to_force"):
+                    scene.servo_to_force(T_nom, target_n=force_target_n)  # hold a realistic force
+                    contacted = scene.in_contact()
+                elif hasattr(scene, "servo_to_contact"):
                     contacted = scene.servo_to_contact(T_nom)
                 else:
                     scene.set_probe_pose(T_nom)

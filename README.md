@@ -107,8 +107,10 @@ makes the anatomy masks free.
 - **Anatomy masks are free.** Reslicing the *label* volume at the same pose as the intensity
   volume yields per-frame segmentation ground truth — no manual labelling.
 - **Force comes from physics, not the CBCT.** Contact force is produced by Genesis contact
-  dynamics of the probe pressing on the phantom; the CBCT yields only image + mask. Rigid
-  reslicing also omits tissue deformation — a known residual sim-to-real gap.
+  dynamics of the probe pressing on a *soft* (tissue-compliant) phantom and force-servoed to a
+  realistic target (~few N, `UltrasoundScene.servo_to_force` + `SceneConfig.contact_timeconst`);
+  the CBCT yields only image + mask. Reslicing is still rigid (no tissue deformation) — a known
+  residual sim-to-real gap.
 - **Mesh ≠ volume.** Genesis (a physics engine) consumes the *surface mesh* to make the
   probe glide on the phantom; reslicing consumes the *volume*. The CBCT DICOM yields three
   distinct products (volume, surface mesh, label) that must not be conflated.
@@ -156,7 +158,10 @@ The sim uses the **Franka Research 3 (FR3)** — the real hardware — vendored 
 model (Apache-2.0, license kept under `src/deepussim/assets/franka_fr3/`). Genesis only
 bundles the older Panda; FR3 differs in joint limits, dynamics, and meshes. The FR3
 model has no gripper — it ends at the `fr3_link7` flange with an attachment site 0.107 m
-out, which is where a US probe mounts (`SceneConfig.probe_offset`).
+out, where the US probe mesh mounts. IK drives `fr3_link7`, but the rosbag/hand-eye are
+measured from the *flange*, so `SceneConfig.probe_offset = trans(0,0,0.107) ∘ T_EE_FROM_PROBE`
+(link7→flange→transducer); the bare flange offset misses real poses by ~15 cm, the composed
+one reaches them to ~7 mm.
 
 ## Setup
 
@@ -183,13 +188,48 @@ The geometric core (`geometry`, `us.reslice`, `us.renderer`, `calib.registration
 only needs numpy/scipy and runs without Genesis installed. The `sim` package imports
 Genesis lazily, so the rest of the package is importable without it.
 
-## Quick start (no real data, no Genesis)
+## Reproduce
+
+All commands assume the conda env above is active. The data files (CBCT, rosbags, phantom
+mesh) are **not** in git — see [`docs/data_layout.md`](docs/data_layout.md) for the `data/`
+tree and how to fetch it. Steps 1 and the tests need neither data nor a GPU.
 
 ```bash
-python scripts/make_synthetic_phantom.py --out data/phantom        # synthetic CBCT + labels
+pytest -q          # geometric core + pipeline unit tests (no data, no GPU)
+```
+
+**1 — Synthetic (no data, no GPU)** — aligned dataset from a generated phantom:
+
+```bash
+python scripts/make_synthetic_phantom.py --out data/phantom
 python scripts/run_scaleup.py --volume data/phantom/intensity.nii.gz \
-    --labels data/phantom/labels.nii.gz --out data/synth_ds --n 64 # generate a dataset
-pytest -q
+    --labels data/phantom/labels.nii.gz --out data/synth_ds --n 64
+```
+
+**2 — Real CBCT, no sim** (needs `data/cbct/`) — reslice + render + free masks, no physics:
+
+```bash
+python scripts/run_scaleup.py --volume data/cbct/intensity.nrrd \
+    --labels data/cbct/labels.nrrd --config configs/renderer.yaml --out data/ds --n 64
+```
+
+**3 — Sim force channel** (needs `data/cbct/` + `data/rosbags/` + a CUDA GPU) — the FR3
+replays the real probe sweep onto the phantom (placed *lying* by the measured calibration),
+force-servos each pose to a realistic contact on a soft tissue-like surface, and writes
+(US image + pose + anatomy mask + contact force):
+
+```bash
+python scripts/run_scaleup.py --volume data/cbct/intensity.nrrd \
+    --labels data/cbct/labels.nrrd --mesh data/cbct/phantom_surface.stl \
+    --config configs/renderer.yaml --out data/ds_sim --sim --headless --n 64
+# drop --headless to watch it live; --force-n (target N) and --contact-timeconst (softness) tune the contact
+```
+
+**4 — Watch / verify the calibration:**
+
+```bash
+python scripts/view_sim.py        # interactive viewer: arm sweeping the lying phantom
+python scripts/verify_replay.py   # geometric check of the probe-mount + placement calibration
 ```
 
 ## Status
@@ -216,17 +256,23 @@ Replay verification is now also done: `scripts/verify_replay.py` resolved the pr
 (`T_EE_FROM_PROBE`) and the CBCT→world placement geometrically (contact frames ~1–3 cm
 on-surface, dark frames 13–21 cm off), validating the transform chain on both real sequences.
 
+The **real-data sim loop** now closes too (`run_scaleup --sim`, step 3 above): the real probe
+mesh is mounted on the flange (`probe_offset = trans(0,0,0.107) ∘ T_EE_FROM_PROBE`, IK reaches
+real poses to ~7 mm); the phantom is placed *lying* (`T_WORLD_FROM_CBCT ∘ Rx(90°)`, matching
+the rig and `scripts/view_sim.py`) and seated onto the real contact cloud; and the arm replays
+the real sweep, force-servoing each pose to a realistic ~few-N contact on a soft
+(`contact_timeconst`) surface — yielding non-blank US images, anatomy masks, and plausible
+forces (vs. the ~10²–10³ N of a rigid press).
+
 **Pending (Stage 1).**
 - **LC2 registration** — grind the residual into `{US ↔ slice}` pairs (current
   `calib.registration` is point-based, not image-based LC2).
 - **Learned renderer** — only renderer-parameter fitting exists; train an image-translation
   renderer (pix2pix paired on LC2 pairs / CycleGAN unpaired at scale).
-- **Trajectory from the surface** — point-cloud + normals on the CBCT surface (current
-  sampling is a linear sweep).
-- **Probe geometry** — the renderer/reslice model a *linear* probe; the real probe is
-  *convex* (curvilinear), to be modelled.
-- **Sim realism** — phantom-mesh collision from the CBCT surface; force servoing to a
-  realistic target (current rigid press reports ~10²–10³ N); placement from fiducials.
+- **Contact-depth realism** — force magnitude is realistic, but on the soft contact the probe
+  indents deeper than physical; mm-indent-at-target needs a deformable soft-body phantom or
+  finer contact/servo tuning. Placement also still carries a ~cm residual (seated onto the
+  contact cloud, not from fiducials).
 
 **Stage 2.** Encoder evaluation, segmentation, and navigation follow the proposal and begin
 once Stage 1 produces data.

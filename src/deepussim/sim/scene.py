@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from ..geometry import pose_from_pos_quat, mat_to_quat, invert, compose, from_translation
+from ..calib.transforms import T_EE_FROM_PROBE
 
 _GS_INITIALIZED = False
 
@@ -78,23 +79,28 @@ _FR3_HOME = np.array([0.0, 0.0, 0.0, -1.57079, 0.0, 1.57079, -0.7853])
 class SceneConfig:
     backend: str = "gpu"                  # "gpu" | "cpu"
     franka_mjcf: str = field(default_factory=_fr3_mjcf_path)  # vendored FR3 MJCF
-    phantom_mesh: str | None = None       # surface mesh (m); None -> a Box phantom
+    phantom_mesh: str | None = None       # surface mesh; None -> a Box phantom
+    phantom_scale: float = 1.0            # mesh unit scale (use 0.001 for a mm mesh -> m)
     phantom_size: tuple[float, float, float] = (0.2, 0.2, 0.08)  # box phantom (m)
     phantom_pos: tuple[float, float, float] = (0.55, 0.0, 0.04)  # within reach (m)
     phantom_quat: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)  # wxyz
     dt: float = 1e-2
+    contact_timeconst: float | None = None  # rigid-contact softness (s); larger=softer, None=Genesis default
     show_viewer: bool = True   # default: NOT headless — pass show_viewer=False for batch
     camera_pos: tuple[float, float, float] = (1.4, -1.0, 0.9)   # viewer camera (m)
     camera_lookat: tuple[float, float, float] = (0.45, 0.0, 0.1)
     camera_fov: float = 40.0
     ee_link_name: str = "fr3_link7"       # FR3 flange (no "hand"; probe mounts here)
     n_arm_dofs: int = 7
-    # T_ee_from_probe: maps the FR3 flange (link7) to the US image origin (transducer face).
-    # The real probe mesh (us_probe in fr3.xml) mounts at the flange site (z=0.107) and is
-    # ~0.18 m long, so its contacting tip is at link7 z ~= 0.287. The exact hand-eye (45 deg
-    # in-plane + the measured standoff, calib.transforms.T_EE_FROM_PROBE) is reconciled with
-    # the link7 frame when the real rosbag replay is wired into the sim.
-    probe_offset: np.ndarray = field(default_factory=lambda: from_translation([0.0, 0.0, 0.287]))
+    # T_link7_from_probe: maps the link IK drives (fr3_link7) to the US image origin
+    # (transducer face). The real hand-eye T_EE_FROM_PROBE is measured from the Franka *flange*
+    # (= the EE the rosbag current_pose reports), which sits at link7 z=0.107 (the MJCF
+    # attachment_site where the probe mesh mounts). So link7->probe = link7->flange (a 0.107 m
+    # +z shift) composed with the measured flange->probe hand-eye (Rz(-45 deg) + 0.183 m). With
+    # the bare placeholder [0,0,0.287] (no 45 deg) IK lands the probe ~150 mm off real recorded
+    # poses; the composed offset below brings it to ~7-9 mm (then LC2 to sub-mm).
+    probe_offset: np.ndarray = field(
+        default_factory=lambda: compose(from_translation([0.0, 0.0, 0.107]), T_EE_FROM_PROBE))
     home_qpos: np.ndarray = field(default_factory=lambda: _FR3_HOME.copy())
 
 
@@ -139,8 +145,12 @@ class UltrasoundScene:
                 camera_lookat=self.cfg.camera_lookat,
                 camera_fov=self.cfg.camera_fov,
             )
+        rigid_options = None
+        if self.cfg.contact_timeconst is not None:
+            rigid_options = gs.options.RigidOptions(constraint_timeconst=self.cfg.contact_timeconst)
         self._scene = gs.Scene(
             sim_options=gs.options.SimOptions(dt=self.cfg.dt),
+            rigid_options=rigid_options,
             viewer_options=viewer_options,
             show_viewer=self.cfg.show_viewer,
         )
@@ -149,6 +159,7 @@ class UltrasoundScene:
         if self.cfg.phantom_mesh:
             self._phantom = self._scene.add_entity(
                 gs.morphs.Mesh(file=self.cfg.phantom_mesh, fixed=True,
+                               scale=self.cfg.phantom_scale,
                                pos=self.cfg.phantom_pos,
                                quat=self.cfg.phantom_quat,
                                align=False)
@@ -221,8 +232,8 @@ class UltrasoundScene:
 
     def servo_to_force(self, T_world_from_probe: np.ndarray, target_n: float = 5.0,
                        gain_m_per_n: float = 2e-4, tol_n: float = 1.0,
-                       approach_steps: int = 120, settle_steps: int = 6,
-                       max_iter: int = 80, backoff: float = 0.10) -> float:
+                       approach_steps: int = 120, settle_steps: int = 15,
+                       max_iter: int = 120, backoff: float = 0.10) -> float:
         """Approach, then hold a realistic contact force by modulating press depth.
 
         A fixed-depth press gives unphysical forces (10^2-10^3 N); here we descend along the

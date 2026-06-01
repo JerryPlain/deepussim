@@ -77,7 +77,18 @@ def main() -> None:
     ap.add_argument("--lines", type=int, default=5, help="raster: number of parallel sweep lines")
     ap.add_argument("--per-line", type=int, default=24, help="raster: poses per sweep line")
     ap.add_argument("--standoff-mm", type=float, default=2.0, help="probe standoff off the surface")
-    ap.add_argument("--sim", action="store_true", help="drive a Genesis scene")
+    ap.add_argument("--sim", action="store_true",
+                    help="drive a Genesis scene: the FR3 replays the real probe trajectory onto "
+                         "the phantom (placed by the measured calibration) and force-servos to "
+                         "--force-n; requires --mesh (CBCT mm STL) and --bags")
+    ap.add_argument("--force-n", type=float, default=5.0,
+                    help="sim: target contact force (N) for the depth-vs-force servo loop")
+    ap.add_argument("--contact-timeconst", type=float, default=3.0,
+                    help="sim: rigid-contact softness (s); the phantom is soft tissue, so a "
+                         "compliant contact (~3) gives realistic few-N forces instead of rigid 10^3 N")
+    ap.add_argument("--bags", nargs="+",
+                    default=["data/rosbags/phantom.bag", "data/rosbags/phantom1.bag"],
+                    help="sim: rosbag(s) whose contact-frame EE poses are replayed as probe targets")
     ap.add_argument("--headless", action="store_true",
                     help="run the sim without the viewer window (default: viewer on)")
     args = ap.parse_args()
@@ -95,31 +106,63 @@ def main() -> None:
         return
 
     # Sim path: poses are nominal probe targets in the sim world (metres); physics gives
-    # the achieved pose + contact force, then the placement bridge maps it into CBCT mm.
+    # the achieved pose + contact force, then the placement bridge maps it back to CBCT mm.
+    import trimesh
     from deepussim.sim.scene import UltrasoundScene, SceneConfig
-    from deepussim.calib.placement import align_points_placement
+    from deepussim.calib import T_WORLD_FROM_CBCT
+    from deepussim.calib.transforms import T_EE_FROM_PROBE
+    from deepussim.calib.placement import meters_to_mm
+    from deepussim.data.rosbag import extract_sequence
+    from deepussim.geometry import make_transform, mat_to_quat, rot_x, invert, compose
 
-    # probe_offset defaults to the placeholder probe tip on the FR3 flange (see SceneConfig).
-    cfg = SceneConfig(show_viewer=not args.headless)
+    if not args.mesh:
+        raise SystemExit("--sim requires --mesh (phantom surface STL in CBCT mm)")
+
+    # Trajectory: replay the real probe sweep. Rosbag contact frames are the EE poses the arm
+    # actually reached on the phantom; the probe target for each is EE pose o hand-eye. Use all
+    # contacts to fit the placement (below), and subsample to --n for the driven sweep.
+    frames = [f for bag in args.bags for f in extract_sequence(bag).frames if f.contact]
+    if not frames:
+        raise SystemExit(f"no contact frames found in {args.bags}")
+    all_origins = np.array([compose(f.pose, T_EE_FROM_PROBE)[:3, 3] for f in frames])
+    pick = np.linspace(0, len(frames) - 1, args.n, dtype=int)
+    sim_poses = [compose(frames[i].pose, T_EE_FROM_PROBE) for i in pick]
+
+    # Phantom placement (matches scripts/view_sim.py, the visually-verified pose): the measured
+    # T_WORLD_FROM_CBCT alone lands the phantom standing on end; the real rig has it LYING, so an
+    # extra Rx(90 deg) about the phantom centre tips it onto its side. We bake that into one rigid
+    # transform from the CBCT-metre mesh frame to the robot world. The measured placement still
+    # carries a residual ~cm offset (doc: "LC2 grinds it to mm"), so we then seat the phantom onto
+    # the real contact cloud with a median translation. The reslice bridge is derived from the
+    # SAME final transform, so mesh, CBCT volume and probe poses stay consistent.
+    mesh = trimesh.load(args.mesh)                                   # CBCT mm
+    c_m = np.asarray(mesh.bounds, dtype=float).mean(0) / 1000.0      # mesh centre (m)
+    T_lie = T_WORLD_FROM_CBCT @ make_transform(rot_x(np.pi / 2.0), [0.0, 0.0, 0.0])
+    T_world_from_cbctm = T_lie @ make_transform(np.eye(3), -c_m)
+    placed = mesh.copy()
+    placed.apply_transform(np.diag([1e-3, 1e-3, 1e-3, 1.0]))
+    placed.apply_transform(T_world_from_cbctm)
+    close, _, _ = trimesh.proximity.ProximityQuery(placed).on_surface(all_origins)
+    t_align = np.median(all_origins - close, axis=0)                 # seat surface onto contacts
+    T_world_from_cbctm = make_transform(np.eye(3), t_align) @ T_world_from_cbctm
+
+    cfg = SceneConfig(
+        show_viewer=not args.headless,
+        phantom_mesh=args.mesh,
+        phantom_scale=0.001,                              # mm mesh -> metres
+        phantom_pos=tuple(T_world_from_cbctm[:3, 3]),
+        phantom_quat=tuple(mat_to_quat(T_world_from_cbctm[:3, :3])),
+        contact_timeconst=args.contact_timeconst,         # soft tissue -> realistic few-N contact
+    )
     scene = UltrasoundScene(cfg).build()
     scene.reset()
 
-    px, py, pz = cfg.phantom_pos
-    top = pz + cfg.phantom_size[2] / 2.0               # box top surface in sim (m)
-    # Probe targets just below the surface so the arm presses into contact.
-    start = np.array([px - 0.04, py, top - 0.02])
-    end = np.array([px + 0.04, py, top - 0.02])
-    sim_poses = linear_sweep(start, end, args.n, axial_dir=(0.0, 0.0, -1.0))
-
-    # Placement: map the sim box-top centre onto the CBCT volume's top-centre voxel.
-    vox_top = np.array([(volume.shape[0] - 1) / 2.0, (volume.shape[1] - 1) / 2.0,
-                        volume.shape[2] - 1.0])
-    cbct_top = volume.voxel_to_world(vox_top)[0]
-    placement = align_points_placement([px, py, top], cbct_top)
+    # Bridge achieved sim poses back to CBCT mm (derived from the SAME placement transform).
+    sim_to_cbct = meters_to_mm(invert(T_world_from_cbctm))
 
     written = generate_dataset(args.out, volume, sim_poses, geom, params,
-                               label_volume=labels, scene=scene, sim_to_cbct=placement,
-                               settle_steps=300)
+                               label_volume=labels, scene=scene, sim_to_cbct=sim_to_cbct,
+                               force_target_n=args.force_n, settle_steps=300)
     print(f"wrote {written} samples to {args.out}")
 
 
