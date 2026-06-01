@@ -4,6 +4,23 @@ This file tracks meaningful repository changes.
 
 ## [Unreleased]
 
+## 2026-06-01 — Curvilinear (convex) probe geometry; drop the linear model
+
+**Commits:** `02c611f`
+
+### us
+
+- **[BREAKING][API]** `ProbeGeometry` now models the real **curvilinear (convex)** probe: a
+  sector fan whose scan lines diverge from a virtual apex at `z = -radius_mm`, span
+  `± fov_deg/2`, and sample from the face out to `radius_mm + depth_mm`. Fields changed from
+  `width_mm` to `radius_mm` + `fov_deg`. The rectangular linear model was removed (a convex
+  array with `radius → ∞` is its degenerate case, so one geometry suffices) — this matches
+  the actual probe and unifies the geometry used by reslice, render, calibration, and
+  scale-up.
+- `reslice`/`render` keep the same interface (`n_ax`/`n_lat`/`axial_depths_mm`/`plane_grid`),
+  so no call sites changed; `configs/renderer.yaml` and the reslice tests move to the convex
+  fields. `radius_mm`/`fov_deg` are placeholders until estimated from the real US fan.
+
 ## 2026-05-31 — Surface-constrained trajectory + wire into scale-up
 
 **Commits:** `0803d4f`
