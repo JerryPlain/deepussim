@@ -10,9 +10,11 @@ renderer:
   dynamic_range_db: 50.0    # log-compression window
   seed: 0                   # speckle RNG seed (null = nondeterministic)
 
-# Imaging geometry of the synthetic linear probe (deepussim.us.reslice.ProbeGeometry).
+# Curvilinear (convex) probe geometry (deepussim.us.reslice.ProbeGeometry).
+# radius_mm/fov_deg are placeholders until estimated from the real US fan (+ depth scale).
 geometry:
-  width_mm: 40.0            # lateral field of view at the probe face
-  depth_mm: 80.0            # axial imaging depth into tissue
-  n_lat: 256               # lateral samples (image width, px)
-  n_ax: 512                # axial samples (image height, px)
+  radius_mm: 55.0          # convex-array radius (virtual apex -> transducer face)
+  fov_deg: 70.0            # total sector angle (lateral field of view)
+  depth_mm: 110.0          # imaging depth along each beam, from the face outward
+  n_lat: 256               # scan lines (image width, px)
+  n_ax: 512                # samples per scan line (image height, px)

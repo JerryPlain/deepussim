@@ -47,7 +47,7 @@ def render(
     geom: ProbeGeometry,
     params: RendererParams | None = None,
 ) -> np.ndarray:
-    """Render a B-mode-like image from a resliced intensity plane (n_ax, n_lat)."""
+    """Render a B-mode-like image from a resliced intensity fan (n_ax, n_lat)."""
     params = params or RendererParams()
     img = np.asarray(intensity, dtype=float)
     if img.shape != (geom.n_ax, geom.n_lat):
