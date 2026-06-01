@@ -89,10 +89,12 @@ class SceneConfig:
     camera_fov: float = 40.0
     ee_link_name: str = "fr3_link7"       # FR3 flange (no "hand"; probe mounts here)
     n_arm_dofs: int = 7
-    # T_ee_from_probe: maps the FR3 flange (link7) to the US image plane. Default = the
-    # placeholder probe tip in fr3.xml (~0.18 m on link7 z). ESTIMATE — set to the real
-    # probe/fixture once measured (hand-eye).
-    probe_offset: np.ndarray = field(default_factory=lambda: from_translation([0.0, 0.0, 0.18]))
+    # T_ee_from_probe: maps the FR3 flange (link7) to the US image origin (transducer face).
+    # The real probe mesh (us_probe in fr3.xml) mounts at the flange site (z=0.107) and is
+    # ~0.18 m long, so its contacting tip is at link7 z ~= 0.287. The exact hand-eye (45 deg
+    # in-plane + the measured standoff, calib.transforms.T_EE_FROM_PROBE) is reconciled with
+    # the link7 frame when the real rosbag replay is wired into the sim.
+    probe_offset: np.ndarray = field(default_factory=lambda: from_translation([0.0, 0.0, 0.287]))
     home_qpos: np.ndarray = field(default_factory=lambda: _FR3_HOME.copy())
 
 
@@ -216,6 +218,38 @@ class UltrasoundScene:
             if self.in_contact(threshold_n):
                 break
         return self.in_contact(threshold_n)
+
+    def servo_to_force(self, T_world_from_probe: np.ndarray, target_n: float = 5.0,
+                       gain_m_per_n: float = 2e-4, tol_n: float = 1.0,
+                       approach_steps: int = 120, settle_steps: int = 6,
+                       max_iter: int = 80, backoff: float = 0.10) -> float:
+        """Approach, then hold a realistic contact force by modulating press depth.
+
+        A fixed-depth press gives unphysical forces (10^2-10^3 N); here we descend along the
+        probe axial and adjust the depth proportionally to the force error until ``|f|`` is
+        within ``tol_n`` of ``target_n``. Returns the achieved contact-force magnitude (N).
+        """
+        T = np.asarray(T_world_from_probe, dtype=float)
+        axial = T[:3, 2] / (np.linalg.norm(T[:3, 2]) + 1e-12)  # +axial = into the tissue
+        T_approach = T.copy()
+        T_approach[:3, 3] = T[:3, 3] - backoff * axial
+        self.set_probe_pose(T_approach)
+        self.step(approach_steps)
+
+        depth = 0.0
+        f = 0.0
+        for _ in range(int(max_iter)):
+            target = T.copy()
+            target[:3, 3] = T[:3, 3] + depth * axial
+            self.set_probe_pose(target)
+            self.step(settle_steps)
+            f = float(np.linalg.norm(self.contact_force()))
+            err = target_n - f
+            if abs(err) <= tol_n:
+                break
+            depth += gain_m_per_n * err          # too soft -> press deeper; too hard -> back off
+            depth = float(np.clip(depth, -0.03, 0.03))
+        return f
 
     # --- readouts ---------------------------------------------------------
     def probe_pose(self) -> np.ndarray:

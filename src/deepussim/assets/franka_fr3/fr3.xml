@@ -64,6 +64,8 @@
     <mesh name="link5_coll" file="link5.stl"/>
     <mesh name="link6_coll" file="link6.stl"/>
     <mesh name="link7_coll" file="link7.stl"/>
+    <!-- deepussim: real US probe outer shell (convex hull of convex_model_stl.stl, m). -->
+    <mesh name="us_probe" file="us_probe_hull.obj"/>
   </asset>
 
   <worldbody>
@@ -137,13 +139,14 @@
                       <geom mesh="link7_3" material="black" class="visual"/>
                       <geom name="fr3_link7_collision" class="collision" mesh="link7_coll"/>
                       <site name="attachment_site" pos="0 0 0.107"/>
-                      <!-- deepussim: PLACEHOLDER US probe rigidly mounted at the flange
-                           attachment site. Dimensions are an ESTIMATE — replace with the
-                           real probe + fixture geometry. Tip (contacting point) ~z=0.18. -->
-                      <geom name="us_probe_visual" class="visual" type="cylinder"
-                            fromto="0 0 0.107 0 0 0.18" size="0.018" material="black"/>
-                      <geom name="us_probe_collision" class="collision" type="cylinder"
-                            fromto="0 0 0.107 0 0 0.18" size="0.018"/>
+                      <!-- deepussim: real US probe (convex_model_stl.stl) rigidly mounted at
+                           the flange. Mesh frame: origin at the mount end, +z to the tip
+                           (~0.18 m long), so it sits along link7 +z from the attachment site.
+                           MuJoCo collides via the convex hull. -->
+                      <geom name="us_probe_visual" class="visual" type="mesh" mesh="us_probe"
+                            pos="0 0 0.107" material="black"/>
+                      <geom name="us_probe_collision" class="collision" type="mesh"
+                            mesh="us_probe" pos="0 0 0.107"/>
                     </body>
                   </body>
                 </body>
