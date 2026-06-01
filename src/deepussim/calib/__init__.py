@@ -9,10 +9,11 @@ from .placement import (
     sim_pose_to_cbct,
 )
 from .transforms import (
-    ETU,
+    T_PROBE_FROM_EE,
+    T_EE_FROM_PROBE,
     T_PHANTOM_FROM_ROBOT,
     T_ROBOT_FROM_PHANTOM,
-    probe_offset,
+    T_WORLD_FROM_CBCT,
 )
 
 __all__ = [
@@ -25,8 +26,9 @@ __all__ = [
     "align_points_placement",
     "align_centers_placement",
     "sim_pose_to_cbct",
-    "ETU",
+    "T_PROBE_FROM_EE",
+    "T_EE_FROM_PROBE",
     "T_PHANTOM_FROM_ROBOT",
     "T_ROBOT_FROM_PHANTOM",
-    "probe_offset",
+    "T_WORLD_FROM_CBCT",
 ]

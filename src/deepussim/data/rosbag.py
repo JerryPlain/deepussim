@@ -8,7 +8,7 @@ Each bag carries exactly two topics (confirmed on phantom.bag / phantom1.bag):
 The pose stream (~94 Hz) is denser than the image stream (~15 Hz), so each image is
 matched to the **nearest pose by header stamp** (image and pose rates differ). The
 matched pose is ``T_base_from_ee`` in metres — exactly the ``RTE(t)`` segment of the
-US-pixel -> CBCT-voxel chain (doc §4.2); compose it with ``ETU`` downstream.
+US-pixel -> CBCT-voxel chain (doc §4.2); compose it with ``T_EE_FROM_PROBE`` downstream.
 
 Dark / non-contact frames (probe lifted off, no acoustic coupling) are **tagged**
 (``contact=False``), never silently dropped (doc §4.3): they are no-contact negatives for

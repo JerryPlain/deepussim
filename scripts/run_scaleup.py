@@ -4,11 +4,11 @@
 No-sim by default (geometric poses, no force). Pass ``--sim`` to drive a Genesis scene
 for reachable poses + contact force (requires Genesis + an implemented sim.scene).
 
+    # surface-constrained sweep over the real phantom (geometry branch):
     python scripts/run_scaleup.py \
-        --volume data/phantom/intensity.nii.gz \
-        --labels data/phantom/labels.nii.gz \
-        --config configs/renderer.yaml \
-        --out data/synth_ds --n 64
+        --volume data/cbct/intensity.nrrd --labels data/cbct/labels.nrrd \
+        --mesh data/cbct/phantom_surface.stl --trajectory surface \
+        --config configs/renderer.yaml --out data/ds --n 64
 """
 from __future__ import annotations
 
@@ -18,10 +18,10 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from deepussim.data.volume import load_nifti
+from deepussim.data.volume import load_volume
 from deepussim.us.reslice import ProbeGeometry
 from deepussim.us.renderer import RendererParams
-from deepussim.pipeline.sampling import linear_sweep
+from deepussim.pipeline.sampling import linear_sweep, surface_sweep, top_sweep_endpoints
 from deepussim.pipeline.scaleup import generate_dataset
 
 
@@ -34,30 +34,49 @@ def load_config(path: str | None):
     return params, geom
 
 
+def nosim_poses(args, volume):
+    """Probe poses in the CBCT mm frame for the no-sim reslice path."""
+    if args.trajectory == "surface":
+        if not args.mesh:
+            raise SystemExit("--trajectory surface requires --mesh (phantom surface STL, CBCT mm)")
+        import trimesh
+        mesh = trimesh.load(args.mesh)
+        start, end = top_sweep_endpoints(mesh, axis=args.sweep_axis, span_frac=args.span_frac)
+        return surface_sweep(mesh, start, end, args.n, standoff_mm=args.standoff_mm)
+    # center-sweep (default): a straight line across the volume centre, aimed -z.
+    c = volume.center_world()
+    half = volume.spacing * np.array(volume.shape) * 0.3
+    start = c + np.array([-half[0], 0.0, half[2]])
+    end = c + np.array([half[0], 0.0, half[2]])
+    return linear_sweep(start, end, args.n, axial_dir=(0.0, 0.0, -1.0))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--volume", required=True, help="CBCT intensity volume (NIfTI)")
-    ap.add_argument("--labels", help="CBCT label volume (NIfTI) for anatomy masks")
+    ap.add_argument("--volume", required=True, help="CBCT intensity volume (.nrrd/.nii.gz)")
+    ap.add_argument("--labels", help="CBCT label volume (.nrrd/.nii.gz) for anatomy masks")
     ap.add_argument("--config", help="renderer/geometry YAML (configs/renderer.yaml)")
     ap.add_argument("--out", required=True, help="output dataset directory")
     ap.add_argument("--n", type=int, default=64, help="number of poses to sample")
+    ap.add_argument("--trajectory", choices=["center-sweep", "surface"], default="center-sweep",
+                    help="no-sim pose source: straight sweep across the volume, or a "
+                         "surface-constrained glide over the phantom mesh (--mesh)")
+    ap.add_argument("--mesh", help="phantom surface STL (CBCT mm) for --trajectory surface")
+    ap.add_argument("--sweep-axis", type=int, default=0, help="surface sweep axis (0=x, 1=y)")
+    ap.add_argument("--span-frac", type=float, default=0.6, help="surface sweep span fraction")
+    ap.add_argument("--standoff-mm", type=float, default=2.0, help="probe standoff off the surface")
     ap.add_argument("--sim", action="store_true", help="drive a Genesis scene")
     ap.add_argument("--headless", action="store_true",
                     help="run the sim without the viewer window (default: viewer on)")
     args = ap.parse_args()
 
-    volume = load_nifti(args.volume)
-    labels = load_nifti(args.labels) if args.labels else None
+    volume = load_volume(args.volume)
+    labels = load_volume(args.labels) if args.labels else None
     params, geom = load_config(args.config)
 
     if not args.sim:
-        # No-sim: reslice poses live directly in the CBCT frame (mm). Sweep across the
-        # volume centre, probe aimed along -z into the volume.
-        c = volume.center_world()
-        half = volume.spacing * np.array(volume.shape) * 0.3
-        start = c + np.array([-half[0], 0.0, half[2]])
-        end = c + np.array([half[0], 0.0, half[2]])
-        poses = linear_sweep(start, end, args.n, axial_dir=(0.0, 0.0, -1.0))
+        # No-sim: poses live directly in the CBCT frame (mm); reslice + render + free mask.
+        poses = nosim_poses(args, volume)
         written = generate_dataset(args.out, volume, poses, geom, params,
                                    label_volume=labels)
         print(f"wrote {written} samples to {args.out}")

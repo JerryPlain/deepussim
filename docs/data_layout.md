@@ -14,7 +14,7 @@ actual data is shared out-of-band.
 
 - **Raw inputs** (DICOM, rosbags, probe mesh): **shared Google Drive folder** —
   <https://drive.google.com/drive/folders/1_i2uUaQEUuji7q3dmmKmMw8uejgDA38m>
-  (Feng's scan-data link, plus the probe mesh).
+  (the real scan sequences plus the probe mesh).
 - **Derived assets** (NIfTI/NRRD/STL produced in 3D Slicer): uploaded to the **same Drive
   folder** so teammates don't each have to re-run Slicer + TotalSegmentator. They can also
   be regenerated locally — see [Reproduce derived assets](#reproduce-derived-assets).
@@ -33,7 +33,7 @@ data/
     phantom_surface.stl       phantom outer surface, mm (CBCT frame)    [derived ②]
     phantom_surface_m.stl     same, scaled to metres for Genesis        [derived ②]
   probe/
-    convex_model_stl.stl      US probe outer shell (from Feng)          [raw]
+    convex_model_stl.stl      US probe outer shell (supplied)           [raw]
   rosbags/
     phantom.bag               real sequence 1 (ROS1)                    [raw]
     phantom1.bag              real sequence 2 (ROS1)                    [raw]

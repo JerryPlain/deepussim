@@ -26,7 +26,7 @@ supervision** — and never elsewhere; everything downstream is synthesized.
 flowchart TB
     CBCT[("CBCT DICOM<br/>(phantom)")]
     USREAL[("Real US<br/>2 ROS1 rosbags")]
-    PROBE[["Probe mesh<br/>(Feng)"]]
+    PROBE[["Probe mesh<br/>(supplied)"]]
 
     subgraph STAGE1["Stage 1 · real-to-sim — build and calibrate the data generator"]
         direction TB
@@ -73,7 +73,7 @@ p_C  =  C_T_R · R_T_E(t) · E_T_U · U_T_img · p_img
 | Segment | Meaning | Source / status |
 |---|---|---|
 | `U_T_img` | US intrinsics (pixel → mm) | CBCT/US DICOM tag (read via SimpleITK/pydicom) |
-| `E_T_U` | probe ↔ end-effector (hand-eye) | measured: `Rz(45°)`, −0.183 m on z — **direction H1/H2 unresolved**, see below |
+| `E_T_U` | probe ↔ end-effector (hand-eye) | `Rz(45°)`, −0.183 m on z; mount = `T_EE_FROM_PROBE` (the measured matrix is its inverse, `T_PROBE_FROM_EE`), resolved by replay |
 | `R_T_E(t)` | end-effector pose (forward kinematics) | per-frame, from the rosbag pose topic |
 | `C_T_R` | CBCT ↔ robot | bridged as (phantom↔CBCT geometry) ∘ `PhTR` (robot↔phantom, measured) |
 
@@ -82,6 +82,25 @@ The ~1.7 mm residual that accumulates along this chain is not resliced directly;
 content, emitting the `{US ↔ slice}` pairs that supervise the renderer. LC2 fixes *pose*
 (where); the renderer fixes *appearance* (how it looks) — the two are kept on separate axes
 and never fused into one loss.
+
+### Trajectory generation
+
+The probe can only glide *along* the phantom surface (it cannot pierce it), so scan
+trajectories are constrained to that surface. Each pose is built from the CBCT surface mesh:
+
+1. **Sample** points across the surface — the candidate spots where the probe sits.
+2. **Estimate a smoothed surface normal** at each point (local-neighbourhood / PCA fit, to
+   avoid the staircase noise of the threshold-extracted mesh).
+3. **Build a probe pose**: position on the surface (with a small outward standoff so the probe
+   rests on it rather than inside), axial axis along the inward normal (perpendicular contact,
+   as in SonoGym); the in-plane rotation is a free, consistent convention.
+4. **Order** the points into a smooth scan path.
+
+The resulting pose stream is then used twice from one source: mapped via `T_WORLD_FROM_CBCT`
+to drive the arm (and press the Genesis probe into contact), and fed directly to reslice the
+volume. Because the arm path and the reslice plane come from the *same* poses, "where the
+probe is" and "which slice we image" are aligned by construction — the same property that
+makes the anatomy masks free.
 
 ### Design invariants
 
@@ -101,11 +120,14 @@ and never fused into one loss.
   `contact = 0` (negatives for the dataset, lift-off supervision for the renderer) rather than
   silently discarded.
 
-> **Open calibration question (`E_T_U` direction).** It is unconfirmed whether the measured
-> hand-eye matrix maps probe→EE (**H1**, use directly) or EE→probe (**H2**, use the inverse).
-> This is resolved by *replaying* a real rosbag trajectory in Genesis under both hypotheses:
-> the correct one places the probe **on** the phantom surface and produces a reslice that
-> matches the real US frame. See [`calib.transforms.probe_offset`](src/deepussim/calib/transforms.py).
+> **Resolved by replay (probe mount + placement).** Driving the probe along the real rosbag
+> poses and measuring its distance to the phantom surface picks the calibration unambiguously
+> ([`scripts/verify_replay.py`](scripts/verify_replay.py)): the mount is `T_EE_FROM_PROBE`
+> (the delivered hand-eye matrix `T_PROBE_FROM_EE` is its inverse), and the measured
+> robot↔phantom matrix is applied directly as CBCT→world (`T_WORLD_FROM_CBCT`). Under the
+> resolved calibration, contact frames land ~1–3 cm from the surface while non-contact
+> ("dark") frames sit 13–21 cm off (lift-off) — a two-sided check of the whole chain on both
+> sequences. The ~cm residual is what LC2 then grinds down.
 
 ## Layout
 
@@ -119,7 +141,7 @@ src/deepussim/
   assets/franka_fr3/ vendored Franka Research 3 MJCF + meshes (MuJoCo Menagerie)
   pipeline/          pose sampling + scale-up dataset generation
 configs/             renderer / phantom / trajectory parameters
-scripts/             run_scaleup.py, extract_rosbags.py, run_real_collection.py, make_synthetic_phantom.py, smoke_sim.py, view_sim.py
+scripts/             run_scaleup.py, extract_rosbags.py, verify_replay.py, run_real_collection.py, make_synthetic_phantom.py, smoke_sim.py, view_sim.py
 docs/                data_collection.md (field checklist), data_layout.md (data/ tree + how to fetch)
 tests/               geometry / quaternion / reslice / renderer / placement / rosbag / transforms unit tests
 ```
@@ -190,9 +212,11 @@ python scripts/extract_rosbags.py data/rosbags/phantom.bag data/rosbags/phantom1
     --out data/sequences --preview 8
 ```
 
+Replay verification is now also done: `scripts/verify_replay.py` resolved the probe mount
+(`T_EE_FROM_PROBE`) and the CBCT→world placement geometrically (contact frames ~1–3 cm
+on-surface, dark frames 13–21 cm off), validating the transform chain on both real sequences.
+
 **Pending (Stage 1).**
-- **Replay verification** — drive the probe mesh along the rosbag poses in Genesis to resolve
-  the `E_T_U` H1/H2 direction and validate the whole transform chain in one shot.
 - **LC2 registration** — grind the residual into `{US ↔ slice}` pairs (current
   `calib.registration` is point-based, not image-based LC2).
 - **Learned renderer** — only renderer-parameter fitting exists; train an image-translation

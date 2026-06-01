@@ -8,7 +8,8 @@ preview PNGs for a visual sanity check.
     python scripts/extract_rosbags.py data/rosbags/phantom.bag data/rosbags/phantom1.bag \
         --out data/sequences --preview 6
 
-The saved poses are ``T_base_from_ee`` (RTE(t)) in metres — compose with ETU downstream.
+The saved poses are ``T_base_from_ee`` (RTE(t)) in metres — compose with the probe mount
+``T_EE_FROM_PROBE`` downstream.
 """
 from __future__ import annotations
 

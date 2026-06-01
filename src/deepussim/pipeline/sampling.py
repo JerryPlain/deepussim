@@ -45,3 +45,89 @@ def tilt_fan(position, n: int, max_tilt_deg: float = 20.0,
         R[:3, :3] = base[:3, :3] @ rot_x(a)
         out.append(R)
     return out
+
+
+# --- surface-constrained trajectory (the real generator) ------------------
+# The probe can only glide *along* the phantom surface, so poses are placed on the
+# CBCT surface mesh: sample a point, estimate a smoothed normal, rest the probe on the
+# surface with its axial (+z) axis pointing inward (perpendicular contact). The same
+# pose stream then drives both the arm and the volume reslice (aligned by construction).
+
+
+def _pose_on_surface(surface_pt, normal_out, sweep_dir, standoff_mm) -> np.ndarray:
+    """Probe pose resting on the surface: +z axial inward, +x along the sweep direction.
+
+    ``normal_out`` is the unit outward surface normal. The probe sits ``standoff_mm`` out
+    along it; its axial axis points inward (``-normal_out``); the lateral (+x) axis follows
+    ``sweep_dir`` projected into the imaging plane so the image width tracks the scan.
+    """
+    z = -np.asarray(normal_out, dtype=float)
+    z = z / (np.linalg.norm(z) + 1e-12)
+    d = np.asarray(sweep_dir, dtype=float)
+    x = d - (d @ z) * z
+    if np.linalg.norm(x) < 1e-6:  # sweep parallel to the normal: pick any in-plane axis
+        ref = np.array([1.0, 0.0, 0.0]) if abs(z[0]) < 0.9 else np.array([0.0, 1.0, 0.0])
+        x = ref - (ref @ z) * z
+    x = x / (np.linalg.norm(x) + 1e-12)
+    y = np.cross(z, x)
+    R = np.column_stack([x, y, z])
+    pos = np.asarray(surface_pt, dtype=float) + standoff_mm * np.asarray(normal_out, dtype=float)
+    return make_transform(R, pos)
+
+
+def _smoothed_normal(tree, vertices, point, radius, n_fallback=30):
+    """Outward-ish unit normal at ``point`` via PCA over neighbouring mesh vertices."""
+    idx = tree.query_ball_point(point, radius)
+    if len(idx) < 8:
+        idx = tree.query(point, n_fallback)[1]
+    Q = vertices[idx] - vertices[idx].mean(axis=0)
+    _, vecs = np.linalg.eigh(Q.T @ Q)
+    n = vecs[:, 0]  # smallest-variance direction = surface normal
+    return n / (np.linalg.norm(n) + 1e-12)
+
+
+def surface_sweep(mesh, start, end, n: int, standoff_mm: float = 2.0,
+                  smooth_radius_mm: float = 8.0) -> list[np.ndarray]:
+    """``n`` probe poses (``T_cbct_from_probe``, mm) gliding along the phantom surface.
+
+    ``start``/``end`` are guide points in the CBCT mm frame placed *outside* the phantom on
+    the approach side. Each is projected to the nearest surface point; a smoothed normal is
+    estimated there (PCA over a ``smooth_radius_mm`` neighbourhood, oriented toward the guide
+    point so it points outward) and a probe pose is built resting on the surface with the
+    axial axis pointing inward. Returns the poses in scan order.
+    """
+    from scipy.spatial import cKDTree
+
+    V = np.asarray(mesh.vertices, dtype=float)
+    tree = cKDTree(V)
+    start = np.asarray(start, dtype=float)
+    end = np.asarray(end, dtype=float)
+    sweep_dir = end - start
+
+    poses = []
+    for t in np.linspace(0.0, 1.0, n):
+        guide = start + t * sweep_dir
+        surface_pt = V[tree.query(guide)[1]]
+        normal = _smoothed_normal(tree, V, surface_pt, smooth_radius_mm)
+        if normal @ (guide - surface_pt) < 0:  # orient outward (toward the guide point)
+            normal = -normal
+        poses.append(_pose_on_surface(surface_pt, normal, sweep_dir, standoff_mm))
+    return poses
+
+
+def top_sweep_endpoints(mesh, axis: int = 0, span_frac: float = 0.6,
+                        clearance_mm: float = 20.0):
+    """Convenience guide endpoints for a sweep across the mesh's +z-top along ``axis``.
+
+    Returns ``(start, end)`` points held ``clearance_mm`` above the top of the bounding box,
+    spanning ``span_frac`` of the extent along ``axis`` (0=x, 1=y), centred otherwise.
+    """
+    lo, hi = np.asarray(mesh.bounds, dtype=float)
+    centre = (lo + hi) / 2.0
+    half = (hi[axis] - lo[axis]) * span_frac / 2.0
+    z_top = hi[2] + clearance_mm
+    start = centre.copy(); end = centre.copy()
+    start[2] = end[2] = z_top
+    start[axis] = centre[axis] - half
+    end[axis] = centre[axis] + half
+    return start, end
