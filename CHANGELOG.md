@@ -4,6 +4,23 @@ This file tracks meaningful repository changes.
 
 ## [Unreleased]
 
+## 2026-06-01 — Real US probe in sim + contact-force servoing
+
+**Commits:** `993dce3`
+
+### sim
+
+- Mounted the **real US probe** under `fr3_link7`: the convex hull of `convex_model_stl.stl`
+  (scaled to metres, committed as `us_probe_hull.obj`) replaces the placeholder cylinder, so
+  the probe is part of the articulated arm and its contact loads back into it (the flange no
+  longer has to touch the phantom). MuJoCo collides mesh geoms via the convex hull, so the
+  hull is collision-equivalent yet small enough to track. `SceneConfig.probe_offset` moves to
+  the real tip (~0.287 m on link7).
+- **[API]** Added `UltrasoundScene.servo_to_force`: a proportional depth-vs-force loop that
+  holds a realistic contact force (~few N) instead of the fixed-depth press's 10²–10³ N.
+- Verified on GPU with the real phantom placed via `T_WORLD_FROM_CBCT`: the probe reaches a
+  mapped surface-trajectory pose and contacts; servoing pulls the force from ~63 N to ~7 N.
+
 ## 2026-06-01 — Multi-line raster trajectory for area-coverage scale-up
 
 **Commits:** `51e873d`
