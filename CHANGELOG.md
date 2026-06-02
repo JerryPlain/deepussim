@@ -4,6 +4,43 @@ This file tracks meaningful repository changes.
 
 ## [Unreleased]
 
+## 2026-06-02 — LC2 multimodal registration (similarity + fan unwrap + constrained 6-DoF)
+
+**Commits:** `8bb43b8`
+
+The calibration-initialized, constrained-range LC2 rigid refinement (Wein 2013, Fuerst 2014;
+the workflow in Li et al. "Robotic Ultrasound Makes CBCT Alive") that grinds the geometric
+chain's ~cm pose residual toward mm and produces the `{US ↔ CBCT slice}` pairs the renderer
+will be supervised on.
+
+### calib
+
+- **[API]** `calib.lc2.lc2_similarity` — the LC2 metric (`US ≈ α·CT + β·|∇CT| + γ` per local
+  window, explained variance weighted by window US variance; predictors normalized so the
+  per-window 2×2 solve stays well-scaled on smooth volumes). `lc2_map` exposes the per-pixel
+  field; `gradient_magnitude` the |∇CT|.
+- **[API]** `calib.lc2.register_frame_lc2` — bounded 6-DoF Powell search around the calibration
+  pose (perturb in the probe frame, ±`max_trans_mm`/`max_rot_deg`) maximizing LC2.
+- **[API]** `calib.us_geometry.unwrap_fan` — resample a B-mode frame onto the `(n_ax, n_lat)`
+  reslice fan grid so the real US and resliced CBCT share a layout for LC2.
+
+### scripts
+
+- `scripts/run_lc2.py` — per-frame driver: calibration init
+  `C_T_U = (world←cbct)⁻¹ · ee · E_T_U`, unwrap, register, report LC2 before/after, save poses.
+
+### tests
+
+- LC2 high for a true linear combination, low/dropping when independent/misaligned; fan unwrap
+  maps depth→radius; 6-DoF register recovers a perturbed synthetic pose (4.1 mm/LC2 0.65 →
+  1.7 mm/LC2 0.997). 46 tests pass.
+
+> **Real-data status.** The driver runs end-to-end and LC2 improves on every frame (≈0.01 →
+> 0.24), but absolute LC2 is low: the calibration pose starts the fan partly off-tissue (the
+> known ~cm residual). Next: a registration-quality pass — wider/multi-start search and
+> confirming the measured CBCT frame matches the NRRD affine (same family as the `ct_spacing`
+> question).
+
 ## 2026-06-02 — Calibrate the convex probe geometry from the real US fan
 
 **Commits:** `22d31bc`
