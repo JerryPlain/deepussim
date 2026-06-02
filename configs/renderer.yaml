@@ -11,10 +11,11 @@ renderer:
   seed: 0                   # speckle RNG seed (null = nondeterministic)
 
 # Curvilinear (convex) probe geometry (deepussim.us.reslice.ProbeGeometry).
-# radius_mm/fov_deg are placeholders until estimated from the real US fan (+ depth scale).
+# Fitted from the real US fan via scripts/fit_us_geometry.py (--us-spacing 0.166112957,
+# both phantom sequences; apex (434,-270) px, r0=316 r1=927 px, fit residual 3.1 px).
 geometry:
-  radius_mm: 55.0          # convex-array radius (virtual apex -> transducer face)
-  fov_deg: 70.0            # total sector angle (lateral field of view)
-  depth_mm: 110.0          # imaging depth along each beam, from the face outward
+  radius_mm: 52.5          # convex-array radius (virtual apex -> transducer face)
+  fov_deg: 68.1            # total sector angle (lateral field of view)
+  depth_mm: 101.5          # imaging depth along each beam, from the face outward
   n_lat: 256               # scan lines (image width, px)
   n_ax: 512                # samples per scan line (image height, px)

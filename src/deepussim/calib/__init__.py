@@ -15,6 +15,7 @@ from .transforms import (
     T_ROBOT_FROM_PHANTOM,
     T_WORLD_FROM_CBCT,
 )
+from .us_geometry import FanFit, contact_envelope, fit_fan_pixels, fit_fan_geometry
 
 __all__ = [
     "rigid_register",
@@ -22,6 +23,10 @@ __all__ = [
     "ncc",
     "render_loss",
     "fit_renderer",
+    "FanFit",
+    "contact_envelope",
+    "fit_fan_pixels",
+    "fit_fan_geometry",
     "meters_to_mm",
     "align_points_placement",
     "align_centers_placement",
