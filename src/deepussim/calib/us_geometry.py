@@ -107,6 +107,30 @@ def fit_fan_pixels(image: np.ndarray, threshold: int = 20,
     return FanFit((float(ax), float(ay)), r0, r1, abs(fov), resid)
 
 
+def unwrap_fan(image: np.ndarray, fan: FanFit, n_ax: int = 512, n_lat: int = 256,
+               order: int = 1) -> np.ndarray:
+    """Resample a B-mode US frame onto the ``(n_ax, n_lat)`` polar grid reslice produces.
+
+    Each output cell ``(depth_index, scan_line)`` maps to a radius/angle in the fitted fan
+    (``r`` from ``r0_px`` to ``r1_px``, ``θ`` over ``±fov/2``), then to a source pixel which is
+    sampled bilinearly. Output rows = depth, cols = scan line — the *same* layout as
+    ``reslice_volume(volume, …, geom)`` (with matching ``n_ax``/``n_lat``), so the two can be
+    compared by LC2. ``fan`` is the pixel fit from :func:`fit_fan_pixels`.
+    """
+    from scipy.ndimage import map_coordinates
+
+    ax, ay = fan.apex_px
+    depth = np.linspace(0.0, 1.0, n_ax)
+    theta = np.deg2rad(np.linspace(-fan.fov_deg / 2.0, fan.fov_deg / 2.0, n_lat))
+    r = fan.r0_px + np.outer(depth, np.ones(n_lat)) * (fan.r1_px - fan.r0_px)   # (n_ax, n_lat)
+    th = np.outer(np.ones(n_ax), theta)
+    px = ax + r * np.sin(th)
+    py = ay + r * np.cos(th)
+    sampled = map_coordinates(np.asarray(image, dtype=float), [py.ravel(), px.ravel()],
+                              order=order, mode="constant", cval=0.0)
+    return sampled.reshape(n_ax, n_lat)
+
+
 def fit_fan_geometry(image: np.ndarray, us_spacing_mm: float, *, threshold: int = 20,
                      straight_band: tuple[float, float] = (0.08, 0.42),
                      n_lat: int = 256, n_ax: int = 512) -> ProbeGeometry:

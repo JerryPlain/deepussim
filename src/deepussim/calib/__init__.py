@@ -15,7 +15,10 @@ from .transforms import (
     T_ROBOT_FROM_PHANTOM,
     T_WORLD_FROM_CBCT,
 )
-from .us_geometry import FanFit, contact_envelope, fit_fan_pixels, fit_fan_geometry
+from .us_geometry import (
+    FanFit, contact_envelope, fit_fan_pixels, fit_fan_geometry, unwrap_fan,
+)
+from .lc2 import lc2_similarity, lc2_map, gradient_magnitude, register_frame_lc2
 
 __all__ = [
     "rigid_register",
@@ -27,6 +30,11 @@ __all__ = [
     "contact_envelope",
     "fit_fan_pixels",
     "fit_fan_geometry",
+    "unwrap_fan",
+    "lc2_similarity",
+    "lc2_map",
+    "gradient_magnitude",
+    "register_frame_lc2",
     "meters_to_mm",
     "align_points_placement",
     "align_centers_placement",

@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 
 from deepussim.calib.us_geometry import (
-    contact_envelope, fit_fan_pixels, fit_fan_geometry,
+    FanFit, contact_envelope, fit_fan_pixels, fit_fan_geometry, unwrap_fan,
 )
 
 
@@ -49,3 +49,17 @@ def test_contact_envelope_is_max_over_selected_frames():
 def test_degenerate_fan_raises():
     with pytest.raises(ValueError):
         fit_fan_pixels(np.zeros((660, 880), np.uint8))   # empty mask -> no fan
+
+
+def test_unwrap_fan_maps_depth_to_radius():
+    # a display image whose value == radius from the apex; after unwrap each scan-line column
+    # must rise monotonically from r0 (face) to r1 (depth limit).
+    fan = FanFit(apex_px=(440.0, -270.0), r0_px=316.0, r1_px=927.0, fov_deg=68.0, resid_px=0.0)
+    H, W = 660, 880
+    yy, xx = np.mgrid[0:H, 0:W]
+    img = np.hypot(xx - fan.apex_px[0], yy - fan.apex_px[1])     # pixel value = radius
+    pol = unwrap_fan(img, fan, n_ax=100, n_lat=40)
+    col = pol[:, 20]                                             # a central scan line
+    assert col[0] == pytest.approx(316.0, abs=5)
+    assert col[-1] == pytest.approx(927.0, abs=5)
+    assert np.all(np.diff(col) > 0)
