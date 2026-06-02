@@ -4,6 +4,37 @@ This file tracks meaningful repository changes.
 
 ## [Unreleased]
 
+## 2026-06-02 — Calibrate the convex probe geometry from the real US fan
+
+**Commits:** `22d31bc`
+
+With Feng's US pixel spacing (`0.166112957` mm/px), the real probe's imaging fan can be
+measured instead of guessed — completing the `U_T_img` intrinsic of the geometric chain.
+
+### calib
+
+- **[API]** New `calib.us_geometry`: `fit_fan_geometry(image, us_spacing_mm)` fits the convex
+  sector of a B-mode frame (largest-component mask → straight side-edge lines → virtual apex →
+  central-column radii → fov) and scales pixel radii to mm, returning a physical
+  `ProbeGeometry`. `contact_envelope` builds the robust max-projection over contact frames;
+  `fit_fan_pixels` exposes the raw pixel fit (`FanFit`).
+
+### scripts
+
+- `scripts/fit_us_geometry.py` — fit the geometry from extracted sequence(s) + `--us-spacing`,
+  print the `renderer.yaml` block, and save a fan-outline overlay.
+
+### config
+
+- `configs/renderer.yaml` geometry now holds the **fitted** convex params (both phantom
+  sequences; apex (434,−270) px, r0=316 r1=927 px, residual 3.1 px): `radius_mm 52.5`,
+  `fov_deg 68.1`, `depth_mm 101.5` (were placeholder 55/70/110).
+
+> ⚠️ **CT spacing to confirm with Feng.** `data/cbct/intensity.nrrd` reports 0.742822 mm
+> isotropic (raw NRRD `space directions`, confirmed by SimpleITK), but Feng's `ct_spacing` is
+> 0.810738 (~9% off). Likely the NRRD was resampled on export; the true physical CT scale must
+> be confirmed before the CBCT-side mm calibration is trusted. The US side (0.166) is unaffected.
+
 ## 2026-06-01 — Close the real-data sim loop (lying phantom, hand-eye, soft contact)
 
 **Commits:** `889b6b6`
