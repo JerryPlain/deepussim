@@ -7,6 +7,7 @@ from .placement import (
     align_points_placement,
     align_centers_placement,
     sim_pose_to_cbct,
+    seat_phantom_placement,
 )
 from .transforms import (
     T_PROBE_FROM_EE,
@@ -39,6 +40,7 @@ __all__ = [
     "align_points_placement",
     "align_centers_placement",
     "sim_pose_to_cbct",
+    "seat_phantom_placement",
     "T_PROBE_FROM_EE",
     "T_EE_FROM_PROBE",
     "T_PHANTOM_FROM_ROBOT",

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..geometry import make_transform, compose
+from ..geometry import make_transform, compose, rot_x
 from ..data.volume import Volume
 
 M_TO_MM = 1000.0
@@ -53,3 +53,37 @@ def sim_pose_to_cbct(T_simworld_from_probe_m, T_cbct_from_simworld_mm) -> np.nda
     """Map a sim-world probe pose (m) into the CBCT frame (mm), ready for reslice."""
     return compose(np.asarray(T_cbct_from_simworld_mm, dtype=float),
                    meters_to_mm(T_simworld_from_probe_m))
+
+
+def seat_phantom_placement(mesh, contact_origins_m, base, *, lie_down=True) -> np.ndarray:
+    """``T_world_from_cbctm`` (rigid, m): seat the phantom into the robot world for reslicing.
+
+    The measured robot<->CBCT matrix (``base`` = ``T_WORLD_FROM_CBCT``) is expressed in the
+    CBCT *optical/scan* frame {c}, which differs from the DICOM-LPS frame of our exported
+    ``intensity.nrrd`` by a 90 deg roll: applied as-is it stands the phantom on end, so the
+    imaging fan grazes the surface tangentially (the ~90 deg LC2 cannot grind). The real rig
+    has the phantom LYING — an extra ``Rx(90 deg)`` about the phantom centre tips {c} onto the
+    DICOM-LPS orientation, after which the probe presses *into* the tissue (see
+    ``scripts/view_sim.py`` and the LC2 validation). We bake that roll into one rigid transform
+    from the CBCT-metre frame (= DICOM mm / 1000) to the robot world, then seat the surface onto
+    the real contact cloud (the measured placement still carries a residual ~cm offset that LC2
+    then grinds to mm).
+
+    ``mesh`` is the phantom surface (trimesh, CBCT mm); ``contact_origins_m`` are the probe-face
+    positions in the robot/world frame (m) for the in-contact frames. Reslicing uses the SAME
+    transform (``sim_to_cbct = meters_to_mm(invert(result))``), so mesh, volume and probe poses
+    stay consistent.
+    """
+    import trimesh
+
+    base = np.asarray(base, dtype=float)
+    origins = np.asarray(contact_origins_m, dtype=float)
+    c_m = np.asarray(mesh.bounds, dtype=float).mean(0) / M_TO_MM       # phantom centre (m)
+    lie = make_transform(rot_x(np.pi / 2.0), [0.0, 0.0, 0.0]) if lie_down else np.eye(4)
+    T = compose(base, lie, make_transform(np.eye(3), -c_m))           # Rx(90) about the centre
+    placed = mesh.copy()
+    placed.apply_transform(np.diag([1.0 / M_TO_MM] * 3 + [1.0]))      # mm mesh -> metres
+    placed.apply_transform(T)
+    close, _, _ = trimesh.proximity.ProximityQuery(placed).on_surface(origins)
+    t_align = np.median(origins - close, axis=0)                      # seat surface onto contacts
+    return compose(make_transform(np.eye(3), t_align), T)

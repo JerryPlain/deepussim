@@ -54,4 +54,14 @@ T_ROBOT_FROM_PHANTOM = np.array([
 T_PHANTOM_FROM_ROBOT = invert(T_ROBOT_FROM_PHANTOM)
 
 # Placement used when bridging the sim/robot world to the CBCT volume for reslicing.
+#
+# NB: this matrix is expressed in the CBCT *scan/optical* frame {c} (the LoopX frame Feng's
+# calibration lives in), which is rolled 90 deg from the DICOM-LPS frame of our exported
+# ``intensity.nrrd``. Applied to the DICOM volume as-is it stands the phantom on end, so the
+# imaging fan grazes the surface tangentially (a ~90 deg error LC2 cannot grind). The real rig
+# has the phantom LYING: an extra Rx(90 deg) about the phantom centre recovers it — validated by
+# replaying the real EE poses into the volume (the fan then images *into* the tissue and LC2
+# climbs on every contact frame). That roll + a contact-seat is applied by
+# :func:`calib.seat_phantom_placement`; use it (not this raw matrix) to bridge poses into the
+# DICOM volume. scripts/view_sim.py, run_scaleup.py and run_lc2.py all go through it.
 T_WORLD_FROM_CBCT = T_ROBOT_FROM_PHANTOM

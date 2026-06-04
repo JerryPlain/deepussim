@@ -109,11 +109,11 @@ def main() -> None:
     # the achieved pose + contact force, then the placement bridge maps it back to CBCT mm.
     import trimesh
     from deepussim.sim.scene import UltrasoundScene, SceneConfig
-    from deepussim.calib import T_WORLD_FROM_CBCT
+    from deepussim.calib import T_WORLD_FROM_CBCT, seat_phantom_placement
     from deepussim.calib.transforms import T_EE_FROM_PROBE
     from deepussim.calib.placement import meters_to_mm
     from deepussim.data.rosbag import extract_sequence
-    from deepussim.geometry import make_transform, mat_to_quat, rot_x, invert, compose
+    from deepussim.geometry import mat_to_quat, invert, compose
 
     if not args.mesh:
         raise SystemExit("--sim requires --mesh (phantom surface STL in CBCT mm)")
@@ -129,22 +129,12 @@ def main() -> None:
     sim_poses = [compose(frames[i].pose, T_EE_FROM_PROBE) for i in pick]
 
     # Phantom placement (matches scripts/view_sim.py, the visually-verified pose): the measured
-    # T_WORLD_FROM_CBCT alone lands the phantom standing on end; the real rig has it LYING, so an
-    # extra Rx(90 deg) about the phantom centre tips it onto its side. We bake that into one rigid
-    # transform from the CBCT-metre mesh frame to the robot world. The measured placement still
-    # carries a residual ~cm offset (doc: "LC2 grinds it to mm"), so we then seat the phantom onto
-    # the real contact cloud with a median translation. The reslice bridge is derived from the
-    # SAME final transform, so mesh, CBCT volume and probe poses stay consistent.
+    # T_WORLD_FROM_CBCT stands the phantom on end (its CBCT-scan frame is rolled 90 deg from our
+    # DICOM-LPS volume); the real rig has it LYING, so seat_phantom_placement tips it onto its
+    # side and seats the surface onto the real contact cloud. The reslice bridge is derived from
+    # the SAME transform, so mesh, CBCT volume and probe poses stay consistent.
     mesh = trimesh.load(args.mesh)                                   # CBCT mm
-    c_m = np.asarray(mesh.bounds, dtype=float).mean(0) / 1000.0      # mesh centre (m)
-    T_lie = T_WORLD_FROM_CBCT @ make_transform(rot_x(np.pi / 2.0), [0.0, 0.0, 0.0])
-    T_world_from_cbctm = T_lie @ make_transform(np.eye(3), -c_m)
-    placed = mesh.copy()
-    placed.apply_transform(np.diag([1e-3, 1e-3, 1e-3, 1.0]))
-    placed.apply_transform(T_world_from_cbctm)
-    close, _, _ = trimesh.proximity.ProximityQuery(placed).on_surface(all_origins)
-    t_align = np.median(all_origins - close, axis=0)                 # seat surface onto contacts
-    T_world_from_cbctm = make_transform(np.eye(3), t_align) @ T_world_from_cbctm
+    T_world_from_cbctm = seat_phantom_placement(mesh, all_origins, T_WORLD_FROM_CBCT)
 
     cfg = SceneConfig(
         show_viewer=not args.headless,
