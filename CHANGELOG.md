@@ -4,6 +4,43 @@ This file tracks meaningful repository changes.
 
 ## [Unreleased]
 
+## 2026-06-04 — Fix the 90° CBCT-frame roll in the LC2 init (lie-down placement)
+
+**Commits:** `2769501`
+
+Resolves the previous entry's open question — *"confirming the measured CBCT frame matches the
+NRRD affine"*. It did not: the measured `T_WORLD_FROM_CBCT` is expressed in the CBCT scan/optical
+frame `{c}`, rolled 90° from the DICOM-LPS frame of our exported `intensity.nrrd`. Applied as-is
+it stands the phantom on end, so the LC2 init aimed the fan straight out the floor (into air) —
+LC2 ≈ 0 and the constrained refinement could not climb (the ~90° gross error LC2 cannot grind).
+`view_sim.py`/`run_scaleup.py` already tipped the phantom back down (`Rx(90°)` about its centre —
+the real rig has it *lying*), but that correction never reached the LC2 path. No new matrix from
+Feng is needed; the fix was already in our own code.
+
+### calib
+
+- **[API]** `calib.placement.seat_phantom_placement(mesh, contact_origins_m, base)` — one rigid
+  `T_world_from_cbctm`: the lie-down roll about the phantom centre + a median contact-seat onto
+  the real probe cloud. Reslicing derives `sim_to_cbct = meters_to_mm(invert(·))` from the same
+  transform, so mesh, volume and probe poses stay consistent.
+- `calib.transforms` — document the `{c}`↔DICOM-LPS 90° roll on `T_WORLD_FROM_CBCT` and point to
+  the helper (use it, not the raw matrix, to bridge poses into the DICOM volume).
+
+### scripts
+
+- `scripts/run_lc2.py` — **the bug site**: the calibration init now goes through the seated
+  bridge (new `--mesh` arg) instead of the raw matrix.
+- `scripts/run_scaleup.py` — use the shared helper; drop the inline lie-down/contact-seat copy.
+
+> **Real-data status.** Replaying the real EE poses into the volume, the fan now images *into*
+> the tissue (inside-volume 49%→~100%, the resliced surface boundary lines up with the US
+> near-field band — see the broken/fixed/refined overlay) and LC2 climbs on every contact frame
+> (init ≈0.016→0.11, refined ≈0.26, 6/6 improved; `Rx+90` beats `Rx-90`, 0.10 vs 0.04). The
+> gross 90° is gone. Absolute LC2 stays modest and the refinement is bound-limited (~cm residual):
+> this phantom is low-texture in CBCT, so the metric saturates — mm-accuracy is not yet
+> established here. Next: tighten the placement (seat along the normal / per-frame) so LC2 polishes
+> rather than hunts, then the learned renderer. 46 tests pass.
+
 ## 2026-06-02 — LC2 multimodal registration (similarity + fan unwrap + constrained 6-DoF)
 
 **Commits:** `8bb43b8`
