@@ -4,6 +4,41 @@ This file tracks meaningful repository changes.
 
 ## [Unreleased]
 
+## 2026-06-04 — Correct the placement to belly-up; sim trajectory generation
+
+**Commits:** `8b45433`
+
+Supersedes the orientation of the previous entry. That `Rx(90°)` lie-down tipped the phantom
+standing→lying but left it **belly-down**, so the probe grazed / imaged *out* of the body (~10% of
+the fan in tissue) and the LC2 ≈ 0.26 reported there was a weak textured-surface graze, not a deep
+registration. The real rig has it lying **belly-up** — the probe presses straight down onto the
+up-facing anterior surface (the real EE axial is world `-z`) and images into the body.
+
+### calib
+
+- **[API]** `calib.placement.seat_phantom_placement` lie-down is now `Rx(90°)·Rz(180°)` (Rx tips
+  it off-end, Rz flips it belly-up). Validated in sim: **14/14** real poses reachable pressing from
+  above, fan **82%** inside tissue (vs belly-down `Rx(90°)`: 0/18 reachable, ~10%). **LC2 is not the
+  arbiter** here — the low-texture body makes it prefer the wrong belly-down graze, so the physical
+  prior + in-tissue geometry decide the orientation. `view_sim.py` + the `transforms.py` note mirror it.
+- **[API]** `calib.placement.mm_to_meters` — inverse of `meters_to_mm` (maps a CBCT-frame pose back
+  to the sim world to drive the arm).
+
+### pipeline / scripts
+
+- **[API]** `pipeline.sampling.contact_raster` — raster the face the arm actually scanned (from the
+  real contact cloud) rather than the mesh's geometric +z top.
+- `run_scaleup --sim` follows a **generated** trajectory (mapped into the sim world) as well as the
+  real `replay`; `--trajectory` adds `contact`; `--save-trajectory` dumps the poses (`T_cbct_from_probe`).
+- **[API]** `UltrasoundScene` optional offscreen render camera (`SceneConfig.render_camera`, `.render()`).
+- New `scripts/view_trajectory.py` — paper-quality trajectory figure / GIF (generate or load a `.npz`).
+
+> ⚠️ **Known limitation.** The supplied surface mesh is **not watertight**, so its normals are
+> unreliable (real-axial · mesh-normal ≈ −0.26): the mesh-normal samplers (`surface_sweep` /
+> `surface_raster` / `contact_raster`) mis-orient the probe. `replay` is the only reliable trajectory
+> for now; a robust generated trajectory needs a watertight mesh or orientation from the real EE
+> poses. 47 tests pass.
+
 ## 2026-06-04 — Fix the 90° CBCT-frame roll in the LC2 init (lie-down placement)
 
 **Commits:** `2769501`

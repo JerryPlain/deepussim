@@ -75,7 +75,7 @@ p_C  =  C_T_R · R_T_E(t) · E_T_U · U_T_img · p_img
 | `U_T_img` | US intrinsics (pixel → fan mm) | convex fan **fitted** from the real B-mode + Feng's `us_spacing` (`calib.us_geometry.fit_fan_geometry`) |
 | `E_T_U` | probe ↔ end-effector (hand-eye) | `Rz(45°)`, −0.183 m on z; mount = `T_EE_FROM_PROBE` (the measured matrix is its inverse, `T_PROBE_FROM_EE`), resolved by replay |
 | `R_T_E(t)` | end-effector pose (forward kinematics) | per-frame, from the rosbag pose topic |
-| `C_T_R` | CBCT ↔ robot | measured `PhTR` (robot↔phantom) **+ a 90° roll**: `PhTR` lives in the CBCT scan frame `{c}`, rolled 90° from our DICOM-LPS volume, so the phantom is tipped *lying* and seated onto the contacts by `calib.seat_phantom_placement` |
+| `C_T_R` | CBCT ↔ robot | measured `PhTR` (robot↔phantom) **+ a belly-up lie-down** (`Rx90·Rz180`): `PhTR` lives in the CBCT scan frame `{c}`; the phantom is tipped *lying belly-up* and seated onto the contacts by `calib.seat_phantom_placement` |
 
 The cm-scale residual that accumulates along this chain is not resliced directly; **LC2**
 (Linear Correlation of Linear Combination) registers each real US frame to the CBCT by image
@@ -90,18 +90,47 @@ The probe can only glide *along* the phantom surface (it cannot pierce it), so s
 trajectories are constrained to that surface. Each pose is built from the CBCT surface mesh:
 
 1. **Sample** points across the surface — the candidate spots where the probe sits.
-2. **Estimate a smoothed surface normal** at each point (local-neighbourhood / PCA fit, to
-   avoid the staircase noise of the threshold-extracted mesh).
-3. **Build a probe pose**: position on the surface (with a small outward standoff so the probe
-   rests on it rather than inside), axial axis along the inward normal (perpendicular contact,
-   as in SonoGym); the in-plane rotation is a free, consistent convention.
-4. **Order** the points into a smooth scan path.
+   `pipeline.sampling.surface_raster` lays parallel guide lines over the phantom top and
+   projects each to the nearest mesh vertex (`surface_sweep` is the single-line case).
+2. **Estimate a smoothed surface normal** at each point (`_smoothed_normal`: PCA over a
+   neighbourhood, to avoid the staircase noise of the threshold-extracted mesh).
+3. **Build a probe pose** (`_pose_on_surface`): position on the surface (with a small outward
+   standoff so the probe rests on it rather than inside), axial axis along the inward normal
+   (perpendicular contact, as in SonoGym); the in-plane rotation is a free, consistent convention.
+4. **Order** the points into a smooth (serpentine) scan path.
 
-The resulting pose stream is then used twice from one source: mapped through the seated
-placement (`calib.seat_phantom_placement`) to drive the arm (and press the Genesis probe into
-contact), and fed directly to reslice the volume. Because the arm path and the reslice plane
+The code is [`pipeline/sampling.py`](src/deepussim/pipeline/sampling.py); it is exercised on a
+sphere in [`tests/test_sampling.py`](tests/test_sampling.py) (poses rest on the surface +
+standoff, axial · inward-normal ≈ 1, raster covers a 2-D patch). On the real phantom a 120-pose
+raster sits at the 2 mm standoff with axial · inward-normal ≈ 0.99.
+
+The resulting pose stream (`T_cbct_from_probe`, mm) is used **twice from one source** — fed
+directly to reslice the volume, *and* mapped through the seated placement
+(`calib.seat_phantom_placement`, the inverse of the reslice bridge) into the sim world to drive
+the arm and press the Genesis probe into contact. Because the arm path and the reslice plane
 come from the *same* poses, "where the probe is" and "which slice we image" are aligned by
 construction — the same property that makes the anatomy masks free.
+
+**Trajectory sources** feed the same machinery (the `--trajectory` flag of
+[`run_scaleup.py`](scripts/run_scaleup.py)): **replay** (sim only) drives the real rosbag EE poses
+— reachable and on-surface by construction, the faithful reference; **generated** (`surface` /
+`raster` / `contact`) samples novel poses for scale-up, mapped into the sim to drive the arm
+(out-of-reach poses are dropped).
+
+> ⚠️ **Known limitation (this phantom).** The supplied surface mesh is **not watertight**, so its
+> normals are unreliable — the mesh-normal-based generators (`surface_sweep`, `surface_raster`,
+> `contact_raster`) can mis-orient the probe (real-axial · mesh-normal ≈ −0.26 where it should be
+> +1). For now the **reliable** trajectory is `replay`; a robust generated trajectory needs either
+> a watertight mesh (fill holes / remesh) or to orient poses from the real EE poses rather than the
+> mesh. [`scripts/view_trajectory.py`](scripts/view_trajectory.py) renders a saved/generated
+> trajectory (`--trajectory-file` or `--trajectory contact`) for inspection.
+
+A generated trajectory is **deterministic** from (mesh + params), so it need not be stored — the
+achieved poses are written into the dataset anyway; `--save-trajectory <path.npz>` optionally
+dumps it (`T_cbct_from_probe`, mm) for inspection or to reuse the identical poses across runs.
+[`scripts/view_trajectory.py`](scripts/view_trajectory.py) renders one (generate from the mesh,
+or load a saved `.npz`) — poses coloured by scan order with inward axial arrows, plus the
+standoff / axial·normal it sits at — and saves the figure.
 
 ### Design invariants
 
@@ -131,15 +160,17 @@ construction — the same property that makes the anatomy masks free.
 > frames land ~1–3 cm from the surface while non-contact ("dark") frames sit 13–21 cm off
 > (lift-off) — a two-sided check of the whole chain on both sequences.
 
-> **Resolved: the 90° CBCT-frame roll.** That matrix fixes the probe *position* but is expressed
-> in the CBCT scan/optical frame `{c}`, which is rolled 90° from the DICOM-LPS frame of our
-> exported `intensity.nrrd`. Applied raw it stands the phantom on end, so the imaging fan grazes
-> the surface tangentially (the ~90° gross error LC2 cannot grind). The real rig has the phantom
-> *lying*: an extra `Rx(90°)` about its centre — already used in `view_sim.py`/`run_scaleup.py`,
-> now centralised in `calib.seat_phantom_placement` — tips it back so the fan presses *into* the
-> tissue. Validated by replaying the real EE poses into the volume (the fan images inside, the
-> resliced surface lines up with the US near-field band, and LC2 climbs on every contact frame).
-> The remaining residual is a ~cm placement offset, which LC2 then grinds.
+> **Resolved: the CBCT-frame orientation (belly-up).** That matrix fixes the probe *position* but
+> is expressed in the CBCT scan/optical frame `{c}`, rolled from the DICOM-LPS frame of our
+> exported `intensity.nrrd` — applied raw it stands the phantom on end. The real rig has it
+> *lying* **belly-up**: the probe presses straight down onto the up-facing anterior surface (the
+> real EE axial is world `-z`) and images into the body. The lie-down that reproduces this is
+> `Rx(90°)·Rz(180°)` about the phantom centre (`Rx` tips it off-end, `Rz` flips it belly-up),
+> centralised in `calib.seat_phantom_placement`. Validated in sim: **14/14 real poses reachable
+> pressing from above, fan 82% inside tissue**, vs the earlier belly-down `Rx(90°)` alone that
+> imaged out of the body (~10%). **LC2 is not the arbiter here** — the low-texture body makes it
+> *prefer* the wrong belly-down graze, so the physical prior + in-tissue geometry decide the
+> orientation. (Superseded the belly-down placement of commit `2769501`; see CHANGELOG 2026-06-04.)
 
 ## Layout
 
@@ -156,8 +187,8 @@ src/deepussim/
   pipeline/          pose sampling (surface_sweep/raster) + scale-up dataset generation
 configs/             renderer / phantom / trajectory parameters
 scripts/             run_scaleup.py, run_lc2.py, fit_us_geometry.py, extract_rosbags.py,
-                     verify_replay.py, view_sim.py, run_real_collection.py,
-                     make_synthetic_phantom.py, smoke_sim.py
+                     verify_replay.py, view_sim.py, view_trajectory.py,
+                     run_real_collection.py, make_synthetic_phantom.py, smoke_sim.py
 docs/                data_collection.md (field checklist), data_layout.md (data/ tree + how to fetch)
 tests/               geometry / quaternion / reslice / renderer / placement / rosbag / transforms unit tests
 ```
@@ -258,20 +289,25 @@ python scripts/run_scaleup.py --volume data/cbct/intensity.nrrd \
     --trajectory surface --config configs/renderer.yaml --out data/ds --n 64
 ```
 
-  *4b · sim force channel* (GPU) — the FR3 replays the real probe sweep onto the phantom
-  (placed *lying* and seated on the contacts), force-servoing each pose to a realistic ~few-N
-  contact, writing (US image + pose + anatomy mask + contact force):
+  *4b · sim force channel* (GPU) — the FR3 follows the **real `replay`** trajectory onto the
+  phantom (placed *belly-up* and seated on the contacts), force-servoing each pose to a realistic
+  ~few-N contact, writing (US image + pose + anatomy mask + contact force):
 
 ```bash
 python scripts/run_scaleup.py --volume data/cbct/intensity.nrrd \
     --labels data/cbct/labels.nrrd --mesh data/cbct/phantom_surface.stl \
     --config configs/renderer.yaml --out data/ds_sim --sim --headless --n 64
-# drop --headless to watch live; --force-n (target N) and --contact-timeconst (softness) tune the contact
+# drop --headless to watch live in the Genesis viewer; --force-n / --contact-timeconst tune the contact
+```
+
+  `--trajectory raster`/`surface`/`contact` drive a *generated* trajectory instead, but on this
+  phantom they mis-orient (the mesh is not watertight — see the Trajectory-generation note); use
+  `replay` until that is fixed.
 ```
 
 **5 · LC2 registration** (`{US ↔ CBCT slice}` pairs) — refine each real frame's calibration
-pose against the CBCT by image content. The lie-down + contact-seat placement (the 90° roll
-fix) is applied automatically from `--mesh`:
+pose against the CBCT by image content. The belly-up lie-down + contact-seat placement is
+applied automatically from `--mesh`:
 
 ```bash
 python scripts/run_lc2.py --seq data/sequences/phantom.npz --volume data/cbct/intensity.nrrd \
@@ -283,6 +319,8 @@ python scripts/run_lc2.py --seq data/sequences/phantom.npz --volume data/cbct/in
 ```bash
 python scripts/view_sim.py        # interactive viewer: arm sweeping the lying phantom
 python scripts/verify_replay.py   # geometric check of the probe-mount + placement calibration
+python scripts/view_trajectory.py --mesh data/cbct/phantom_surface.stl --trajectory raster \
+    --out data/trajectories/raster.png --save-trajectory data/trajectories/raster.npz  # render+save a trajectory
 ```
 
 ## Status
@@ -301,23 +339,27 @@ end-to-end**; the **appearance (learned renderer)** is the remaining build.
   `data.rosbag`; the real CBCT loads via `data.load_nrrd`; the measured hand-eye `E_T_U` and
   robot↔phantom `PhTR` live in `calib.transforms`.
 - **Calibration resolved** — `verify_replay.py` fixed the probe mount + placement direction
-  (contact frames ~1–3 cm on-surface, dark frames 13–21 cm off, both sequences); the 90° CBCT
-  scan-frame roll is resolved and centralised in `calib.seat_phantom_placement` (phantom *lying*,
-  seated on the contacts).
+  (contact frames ~1–3 cm on-surface, dark frames 13–21 cm off, both sequences); the CBCT
+  scan-frame orientation is resolved to **belly-up** (`Rx90·Rz180`) and centralised in
+  `calib.seat_phantom_placement` — validated in sim (14/14 real poses reachable from above, fan
+  82% inside tissue).
 - **US intrinsics** — the convex fan (`radius 52.5`, `fov 68.1°`, `depth 101.5 mm`) is fitted
   from the real B-mode + Feng's `us_spacing` (`calib.us_geometry`).
-- **Trajectory generation** — surface-constrained `surface_sweep` / `surface_raster` (sample →
-  PCA-smoothed normal → inward-axial pose → scan order); axial · inward-normal ≈ 1.0.
-- **Scale-up loop** — `run_scaleup --sim` drives the arm, presses, bridges each achieved pose
-  into the CBCT frame, and reslices to (US image + anatomy mask + contact force).
-- **LC2 registration** — image-based `lc2_similarity` + constrained 6-DoF `register_frame_lc2`;
-  with the lie-down fix the calibration init now images into the tissue and LC2 climbs on every
-  contact frame (≈0.016 → 0.11 → 0.26 after refinement). 46 tests pass.
+- **Scale-up loop** — `run_scaleup --sim` drives the arm along the real `replay` trajectory,
+  presses, bridges each achieved pose into the CBCT frame, and reslices to (US image + anatomy
+  mask + contact force). `--trajectory` also accepts generated sources mapped into the sim.
+- **LC2 registration** — image-based `lc2_similarity` + constrained 6-DoF `register_frame_lc2`,
+  initialised from the seated placement. 47 tests pass. (Absolute LC2 stays low on this
+  low-texture phantom — it is *not* a reliable arbiter; see the placement note above.)
 
 **Pending (Stage 1).**
 - **Learned renderer (the appearance branch)** — only renderer-*parameter* fitting exists; train
   an image-translation renderer (pix2pix paired on the LC2 `{US ↔ slice}` pairs / CycleGAN
   unpaired at scale). This is the main remaining piece.
+- **Generated trajectory on this phantom** — the surface mesh is not watertight, so the
+  mesh-normal samplers (`surface_sweep`/`surface_raster`/`contact_raster`) mis-orient the probe;
+  `replay` is the only reliable trajectory for now. Fix: a watertight mesh, or orient generated
+  poses from the real EE poses (see the Trajectory-generation note above).
 - **LC2 accuracy / placement** — LC2 removes the gross error but **saturates before mm precision
   on this low-texture phantom**, and the refinement is bound-limited (the placement still carries
   a ~cm offset, seated on the contact cloud rather than from fiducials). Tighten the seat (along
