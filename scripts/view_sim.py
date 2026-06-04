@@ -16,7 +16,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from deepussim.geometry import make_transform, mat_to_quat, rot_x
+from deepussim.geometry import make_transform, mat_to_quat, rot_x, rot_z
 from deepussim.sim.scene import UltrasoundScene, SceneConfig
 
 
@@ -30,9 +30,12 @@ T_WORLD_FROM_PHANTOM_MEASURED = np.array([
     [-0.0451, -0.0098, 0.9989, 0.3135],
     [0.0, 0.0, 0.0, 1.0],
 ], dtype=float)
-T_PHANTOM_LIE_DOWN = make_transform(rot_x(np.pi / 2.0), [0.0, 0.0, 0.0])
+# Lie the phantom down BELLY-UP: Rx(90) tips it off its end, Rz(180) flips the anterior
+# (scan) surface to face up, so the probe presses from above (matches the real rig + the
+# calibrated calib.seat_phantom_placement). See CHANGELOG 2026-06-04.
+T_PHANTOM_LIE_DOWN = make_transform(rot_x(np.pi / 2.0) @ rot_z(np.pi), [0.0, 0.0, 0.0])
 T_WORLD_FROM_PHANTOM = T_WORLD_FROM_PHANTOM_MEASURED @ T_PHANTOM_LIE_DOWN
-PHANTOM_TOP_AXIS = 1
+PHANTOM_TOP_AXIS = 1   # the anterior-posterior axis; the up-facing (anterior) side is -this
 
 
 def probe_pose_over_phantom(lateral_m: float, indent_m: float,
@@ -41,7 +44,7 @@ def probe_pose_over_phantom(lateral_m: float, indent_m: float,
     R_phantom = T_WORLD_FROM_PHANTOM[:3, :3]
     center = T_WORLD_FROM_PHANTOM[:3, 3]
     x_axis = R_phantom[:, 0] / np.linalg.norm(R_phantom[:, 0])
-    normal = R_phantom[:, PHANTOM_TOP_AXIS]
+    normal = -R_phantom[:, PHANTOM_TOP_AXIS]      # up-facing (anterior) side after the belly-up lie-down
     normal = normal / np.linalg.norm(normal)
 
     probe_z = -normal

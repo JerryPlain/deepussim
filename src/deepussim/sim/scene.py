@@ -90,6 +90,12 @@ class SceneConfig:
     camera_pos: tuple[float, float, float] = (1.4, -1.0, 0.9)   # viewer camera (m)
     camera_lookat: tuple[float, float, float] = (0.45, 0.0, 0.1)
     camera_fov: float = 40.0
+    # optional offscreen camera (headless rendering to images, e.g. a sweep preview GIF)
+    render_camera: bool = False
+    render_res: tuple[int, int] = (960, 720)
+    render_pos: tuple[float, float, float] = (1.7, -1.2, 1.1)
+    render_lookat: tuple[float, float, float] = (0.55, 0.2, 0.25)
+    render_fov: float = 38.0
     ee_link_name: str = "fr3_link7"       # FR3 flange (no "hand"; probe mounts here)
     n_arm_dofs: int = 7
     # T_link7_from_probe: maps the link IK drives (fr3_link7) to the US image origin
@@ -122,6 +128,7 @@ class UltrasoundScene:
         self._phantom = None
         self._ee_link = None
         self._ee_local_idx: int | None = None
+        self._camera = None
         self._arm_dofs = np.arange(self.cfg.n_arm_dofs)
 
     # --- construction -----------------------------------------------------
@@ -172,6 +179,12 @@ class UltrasoundScene:
             )
 
         self._franka = self._scene.add_entity(gs.morphs.MJCF(file=self.cfg.franka_mjcf))
+
+        if self.cfg.render_camera:
+            self._camera = self._scene.add_camera(
+                res=self.cfg.render_res, pos=self.cfg.render_pos,
+                lookat=self.cfg.render_lookat, fov=self.cfg.render_fov, GUI=False)
+
         self._scene.build()
 
         self._ee_link = self._franka.get_link(self.cfg.ee_link_name)
@@ -207,6 +220,17 @@ class UltrasoundScene:
     def step(self, n: int = 1) -> None:
         for _ in range(int(n)):
             self._scene.step()
+
+    def render(self) -> np.ndarray:
+        """Render the offscreen camera to an ``(H, W, 3)`` uint8 RGB frame.
+
+        Requires ``SceneConfig.render_camera=True``. For headless previews (e.g. a sweep GIF).
+        """
+        if self._camera is None:
+            raise RuntimeError("no render camera; build with SceneConfig(render_camera=True)")
+        out = self._camera.render()
+        rgb = out[0] if isinstance(out, (tuple, list)) else out
+        return np.asarray(rgb)[..., :3].astype(np.uint8)
 
     def servo_to_contact(self, T_world_from_probe: np.ndarray, backoff: float = 0.10,
                          approach_steps: int = 150, press_steps: int = 250,

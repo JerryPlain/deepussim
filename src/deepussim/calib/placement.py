@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..geometry import make_transform, compose, rot_x
+from ..geometry import make_transform, compose, rot_x, rot_z
 from ..data.volume import Volume
 
 M_TO_MM = 1000.0
@@ -29,6 +29,13 @@ def meters_to_mm(T_pose_m: np.ndarray) -> np.ndarray:
     """Re-express a rigid pose's translation in mm; rotation is unchanged."""
     T = np.asarray(T_pose_m, dtype=float).copy()
     T[:3, 3] *= M_TO_MM
+    return T
+
+
+def mm_to_meters(T_pose_mm: np.ndarray) -> np.ndarray:
+    """Inverse of :func:`meters_to_mm`: re-express a pose's translation in metres."""
+    T = np.asarray(T_pose_mm, dtype=float).copy()
+    T[:3, 3] /= M_TO_MM
     return T
 
 
@@ -58,16 +65,19 @@ def sim_pose_to_cbct(T_simworld_from_probe_m, T_cbct_from_simworld_mm) -> np.nda
 def seat_phantom_placement(mesh, contact_origins_m, base, *, lie_down=True) -> np.ndarray:
     """``T_world_from_cbctm`` (rigid, m): seat the phantom into the robot world for reslicing.
 
-    The measured robot<->CBCT matrix (``base`` = ``T_WORLD_FROM_CBCT``) is expressed in the
-    CBCT *optical/scan* frame {c}, which differs from the DICOM-LPS frame of our exported
-    ``intensity.nrrd`` by a 90 deg roll: applied as-is it stands the phantom on end, so the
-    imaging fan grazes the surface tangentially (the ~90 deg LC2 cannot grind). The real rig
-    has the phantom LYING — an extra ``Rx(90 deg)`` about the phantom centre tips {c} onto the
-    DICOM-LPS orientation, after which the probe presses *into* the tissue (see
-    ``scripts/view_sim.py`` and the LC2 validation). We bake that roll into one rigid transform
-    from the CBCT-metre frame (= DICOM mm / 1000) to the robot world, then seat the surface onto
-    the real contact cloud (the measured placement still carries a residual ~cm offset that LC2
-    then grinds to mm).
+    The measured robot<->CBCT matrix (``base`` = ``T_WORLD_FROM_CBCT``) is expressed in the CBCT
+    *optical/scan* frame {c}, rolled from the DICOM-LPS frame of our exported ``intensity.nrrd``:
+    applied as-is it stands the phantom on end, so the imaging fan grazes the surface tangentially.
+    The real rig has the phantom LYING **belly-up** — the probe presses straight DOWN onto the
+    up-facing anterior surface (verified: the real EE axial is world -z) and images into the body.
+    The lie-down that reproduces this is ``Rx(90 deg) . Rz(180 deg)`` about the phantom centre:
+    ``Rx(90)`` tips it off-end and ``Rz(180)`` flips it belly-up. (Validated in sim: 14/14 real
+    poses reachable pressing from above, fan 82% inside tissue, vs the earlier belly-down
+    ``Rx(90)`` alone which imaged out of the body at ~10% — see CHANGELOG 2026-06-04. LC2 is an
+    unreliable arbiter here: the low-texture body makes it *prefer* the wrong belly-down graze, so
+    the physical prior + in-tissue geometry decide the orientation, not LC2.) We bake that roll
+    into one rigid transform from the CBCT-metre frame (= DICOM mm / 1000) to the robot world, then
+    seat the surface onto the real contact cloud (a residual ~cm offset remains for LC2 to grind).
 
     ``mesh`` is the phantom surface (trimesh, CBCT mm); ``contact_origins_m`` are the probe-face
     positions in the robot/world frame (m) for the in-contact frames. Reslicing uses the SAME
@@ -79,8 +89,9 @@ def seat_phantom_placement(mesh, contact_origins_m, base, *, lie_down=True) -> n
     base = np.asarray(base, dtype=float)
     origins = np.asarray(contact_origins_m, dtype=float)
     c_m = np.asarray(mesh.bounds, dtype=float).mean(0) / M_TO_MM       # phantom centre (m)
-    lie = make_transform(rot_x(np.pi / 2.0), [0.0, 0.0, 0.0]) if lie_down else np.eye(4)
-    T = compose(base, lie, make_transform(np.eye(3), -c_m))           # Rx(90) about the centre
+    lie_R = rot_x(np.pi / 2.0) @ rot_z(np.pi)                         # tip off-end, then belly-up
+    lie = make_transform(lie_R, [0.0, 0.0, 0.0]) if lie_down else np.eye(4)
+    T = compose(base, lie, make_transform(np.eye(3), -c_m))           # lie-down about the centre
     placed = mesh.copy()
     placed.apply_transform(np.diag([1.0 / M_TO_MM] * 3 + [1.0]))      # mm mesh -> metres
     placed.apply_transform(T)

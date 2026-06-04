@@ -2,13 +2,22 @@
 """Step 5 entrypoint: generate a US dataset by reslicing + rendering a CBCT volume.
 
 No-sim by default (geometric poses, no force). Pass ``--sim`` to drive a Genesis scene
-for reachable poses + contact force (requires Genesis + an implemented sim.scene).
+for reachable poses + contact force (requires Genesis + an implemented sim.scene). The
+trajectory (``--trajectory``) is one source for both paths: a generated surface/raster sweep,
+or the real rosbag ``replay`` (sim only).
 
-    # surface-constrained sweep over the real phantom (geometry branch):
+    # no-sim: surface-constrained sweep over the real phantom (geometry branch):
     python scripts/run_scaleup.py \
         --volume data/cbct/intensity.nrrd --labels data/cbct/labels.nrrd \
         --mesh data/cbct/phantom_surface.stl --trajectory surface \
         --config configs/renderer.yaml --out data/ds --n 64
+
+    # sim: drive the SAME generated raster over the phantom and read contact force (needs a GPU):
+    python scripts/run_scaleup.py --sim \
+        --volume data/cbct/intensity.nrrd --labels data/cbct/labels.nrrd \
+        --mesh data/cbct/phantom_surface.stl --trajectory raster \
+        --config configs/renderer.yaml --out data/ds_sim --headless \
+        --save-trajectory data/trajectories/raster.npz
 """
 from __future__ import annotations
 
@@ -22,7 +31,7 @@ from deepussim.data.volume import load_volume
 from deepussim.us.reslice import ProbeGeometry
 from deepussim.us.renderer import RendererParams
 from deepussim.pipeline.sampling import (
-    linear_sweep, surface_sweep, surface_raster, top_sweep_endpoints,
+    linear_sweep, surface_sweep, surface_raster, contact_raster, top_sweep_endpoints,
 )
 from deepussim.pipeline.scaleup import generate_dataset
 
@@ -36,13 +45,20 @@ def load_config(path: str | None):
     return params, geom
 
 
-def nosim_poses(args, volume):
-    """Probe poses in the CBCT mm frame for the no-sim reslice path."""
+def cbct_trajectory(args, volume, mesh=None):
+    """The generated probe trajectory, in the CBCT mm frame (``T_cbct_from_probe`` poses).
+
+    Surface-constrained (``surface``/``raster``, needs the phantom mesh) or a straight
+    ``center-sweep`` across the volume. Used both for the no-sim reslice path *and*, mapped
+    into the sim world, to drive the arm — so "where the probe is" and "which slice we image"
+    come from one source. ``mesh`` may be a preloaded trimesh to avoid re-reading the STL.
+    """
     if args.trajectory in ("surface", "raster"):
-        if not args.mesh:
-            raise SystemExit(f"--trajectory {args.trajectory} requires --mesh (phantom STL, CBCT mm)")
-        import trimesh
-        mesh = trimesh.load(args.mesh)
+        if mesh is None:
+            if not args.mesh:
+                raise SystemExit(f"--trajectory {args.trajectory} requires --mesh (phantom STL, CBCT mm)")
+            import trimesh
+            mesh = trimesh.load(args.mesh)
         if args.trajectory == "raster":
             return surface_raster(mesh, axis=args.sweep_axis, span_frac=args.span_frac,
                                   cross_frac=args.cross_frac, n_lines=args.lines,
@@ -57,6 +73,19 @@ def nosim_poses(args, volume):
     return linear_sweep(start, end, args.n, axial_dir=(0.0, 0.0, -1.0))
 
 
+def save_trajectory(path, poses_cbct_mm) -> None:
+    """Save the generated trajectory (``T_cbct_from_probe`` poses, mm) to a ``.npz``.
+
+    The trajectory is deterministic from (mesh + params), so this is optional — for
+    inspection or to reuse the exact same poses across runs; the achieved poses are also
+    written into the dataset itself.
+    """
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(out, poses_cbct_mm=np.asarray(poses_cbct_mm, dtype=float))
+    print(f"saved trajectory ({len(poses_cbct_mm)} poses, CBCT mm) -> {out}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--volume", required=True, help="CBCT intensity volume (.nrrd/.nii.gz)")
@@ -64,12 +93,19 @@ def main() -> None:
     ap.add_argument("--config", help="renderer/geometry YAML (configs/renderer.yaml)")
     ap.add_argument("--out", required=True, help="output dataset directory")
     ap.add_argument("--n", type=int, default=64, help="number of poses to sample")
-    ap.add_argument("--trajectory", choices=["center-sweep", "surface", "raster"],
-                    default="center-sweep",
-                    help="no-sim pose source: straight sweep across the volume, a single "
-                         "surface-constrained glide, or a multi-line raster over the phantom "
-                         "mesh (--mesh)")
+    ap.add_argument("--trajectory",
+                    choices=["replay", "contact", "center-sweep", "surface", "raster"],
+                    default=None,
+                    help="pose source. 'replay' (sim only, default with --sim) drives the arm "
+                         "along the real rosbag poses; 'contact' (sim) generates a reachable "
+                         "raster over the face the arm actually scanned (the real contact patch); "
+                         "'surface'/'raster' generate over the mesh's geometric +z top (--mesh); "
+                         "'center-sweep' (default without --sim) is a straight sweep across the "
+                         "volume. Generated trajectories work for both the no-sim reslice path "
+                         "and (mapped into the sim world) the --sim force channel.")
     ap.add_argument("--mesh", help="phantom surface STL (CBCT mm) for --trajectory surface/raster")
+    ap.add_argument("--save-trajectory", help="also save the generated trajectory "
+                    "(T_cbct_from_probe poses, mm) to this .npz, e.g. data/trajectories/raster.npz")
     ap.add_argument("--sweep-axis", type=int, default=0, help="surface sweep axis (0=x, 1=y)")
     ap.add_argument("--span-frac", type=float, default=0.6, help="along-sweep span fraction")
     ap.add_argument("--cross-frac", type=float, default=0.4,
@@ -78,9 +114,10 @@ def main() -> None:
     ap.add_argument("--per-line", type=int, default=24, help="raster: poses per sweep line")
     ap.add_argument("--standoff-mm", type=float, default=2.0, help="probe standoff off the surface")
     ap.add_argument("--sim", action="store_true",
-                    help="drive a Genesis scene: the FR3 replays the real probe trajectory onto "
-                         "the phantom (placed by the measured calibration) and force-servos to "
-                         "--force-n; requires --mesh (CBCT mm STL) and --bags")
+                    help="drive a Genesis scene: the FR3 follows the trajectory (--trajectory: "
+                         "the real rosbag replay, or a generated surface/raster sweep) onto the "
+                         "phantom (placed lying + seated on the contacts) and force-servos to "
+                         "--force-n; requires --mesh (CBCT mm STL) and --bags (for the placement)")
     ap.add_argument("--force-n", type=float, default=5.0,
                     help="sim: target contact force (N) for the depth-vs-force servo loop")
     ap.add_argument("--contact-timeconst", type=float, default=3.0,
@@ -93,48 +130,78 @@ def main() -> None:
                     help="run the sim without the viewer window (default: viewer on)")
     args = ap.parse_args()
 
+    # Resolve the default trajectory by mode, then validate: replay/contact are sim-only
+    # (they need the real rosbag contacts + the seated placement that the sim path builds).
+    if args.trajectory is None:
+        args.trajectory = "replay" if args.sim else "center-sweep"
+    if args.trajectory in ("replay", "contact") and not args.sim:
+        raise SystemExit(f"--trajectory {args.trajectory} only applies with --sim "
+                         "(it needs the real contacts + placement)")
+
     volume = load_volume(args.volume)
     labels = load_volume(args.labels) if args.labels else None
     params, geom = load_config(args.config)
 
     if not args.sim:
         # No-sim: poses live directly in the CBCT frame (mm); reslice + render + free mask.
-        poses = nosim_poses(args, volume)
+        poses = cbct_trajectory(args, volume)
+        if args.save_trajectory:
+            save_trajectory(args.save_trajectory, poses)
         written = generate_dataset(args.out, volume, poses, geom, params,
                                    label_volume=labels)
         print(f"wrote {written} samples to {args.out}")
         return
 
-    # Sim path: poses are nominal probe targets in the sim world (metres); physics gives
+    # Sim path: the arm follows nominal probe targets in the sim world (metres); physics gives
     # the achieved pose + contact force, then the placement bridge maps it back to CBCT mm.
     import trimesh
     from deepussim.sim.scene import UltrasoundScene, SceneConfig
     from deepussim.calib import T_WORLD_FROM_CBCT, seat_phantom_placement
     from deepussim.calib.transforms import T_EE_FROM_PROBE
-    from deepussim.calib.placement import meters_to_mm
+    from deepussim.calib.placement import meters_to_mm, mm_to_meters, sim_pose_to_cbct
     from deepussim.data.rosbag import extract_sequence
     from deepussim.geometry import mat_to_quat, invert, compose
 
     if not args.mesh:
         raise SystemExit("--sim requires --mesh (phantom surface STL in CBCT mm)")
 
-    # Trajectory: replay the real probe sweep. Rosbag contact frames are the EE poses the arm
-    # actually reached on the phantom; the probe target for each is EE pose o hand-eye. Use all
-    # contacts to fit the placement (below), and subsample to --n for the driven sweep.
+    mesh = trimesh.load(args.mesh)                                   # CBCT mm
+
+    # Phantom placement (matches scripts/view_sim.py): the measured T_WORLD_FROM_CBCT stands the
+    # phantom on end (its CBCT-scan frame is rolled 90 deg from our DICOM-LPS volume); the real
+    # rig has it LYING, so seat_phantom_placement tips it onto its side and seats the surface onto
+    # the real contact cloud (always taken from the bags). The reslice bridge is derived from the
+    # SAME transform, so mesh, CBCT volume and probe poses stay consistent.
     frames = [f for bag in args.bags for f in extract_sequence(bag).frames if f.contact]
     if not frames:
         raise SystemExit(f"no contact frames found in {args.bags}")
     all_origins = np.array([compose(f.pose, T_EE_FROM_PROBE)[:3, 3] for f in frames])
-    pick = np.linspace(0, len(frames) - 1, args.n, dtype=int)
-    sim_poses = [compose(frames[i].pose, T_EE_FROM_PROBE) for i in pick]
-
-    # Phantom placement (matches scripts/view_sim.py, the visually-verified pose): the measured
-    # T_WORLD_FROM_CBCT stands the phantom on end (its CBCT-scan frame is rolled 90 deg from our
-    # DICOM-LPS volume); the real rig has it LYING, so seat_phantom_placement tips it onto its
-    # side and seats the surface onto the real contact cloud. The reslice bridge is derived from
-    # the SAME transform, so mesh, CBCT volume and probe poses stay consistent.
-    mesh = trimesh.load(args.mesh)                                   # CBCT mm
     T_world_from_cbctm = seat_phantom_placement(mesh, all_origins, T_WORLD_FROM_CBCT)
+    sim_to_cbct = meters_to_mm(invert(T_world_from_cbctm))           # achieved world (m) -> CBCT (mm)
+
+    # Trajectory the arm follows (nominal targets in the sim world, m):
+    if args.trajectory == "replay":
+        # the EE poses the arm actually reached on the phantom (reachable + on-surface),
+        # subsampled to --n.
+        pick = np.linspace(0, len(frames) - 1, args.n, dtype=int)
+        sim_poses = [compose(frames[i].pose, T_EE_FROM_PROBE) for i in pick]
+        nominal_cbct = [sim_pose_to_cbct(p, sim_to_cbct) for p in sim_poses]
+    elif args.trajectory == "contact":
+        # generate a reachable raster over the face the arm actually scanned: map the real
+        # contacts into the CBCT frame, fit a patch there, and densify (the surface/raster +z-top
+        # samplers land on a different, often-unreachable face).
+        rc = np.array([sim_pose_to_cbct(compose(f.pose, T_EE_FROM_PROBE), sim_to_cbct)[:3, 3]
+                       for f in frames])
+        nominal_cbct = contact_raster(mesh, rc, n_lines=args.lines, n_per_line=args.per_line,
+                                      standoff_mm=args.standoff_mm)
+        sim_poses = [compose(T_world_from_cbctm, mm_to_meters(T)) for T in nominal_cbct]
+    else:
+        # a generated CBCT-frame trajectory, mapped into the sim world to drive the arm
+        # (inverse of sim_to_cbct); out-of-reach / non-contacting poses are dropped downstream.
+        nominal_cbct = cbct_trajectory(args, volume, mesh=mesh)
+        sim_poses = [compose(T_world_from_cbctm, mm_to_meters(T)) for T in nominal_cbct]
+    if args.save_trajectory:
+        save_trajectory(args.save_trajectory, nominal_cbct)
 
     cfg = SceneConfig(
         show_viewer=not args.headless,
@@ -146,9 +213,6 @@ def main() -> None:
     )
     scene = UltrasoundScene(cfg).build()
     scene.reset()
-
-    # Bridge achieved sim poses back to CBCT mm (derived from the SAME placement transform).
-    sim_to_cbct = meters_to_mm(invert(T_world_from_cbctm))
 
     written = generate_dataset(args.out, volume, sim_poses, geom, params,
                                label_volume=labels, scene=scene, sim_to_cbct=sim_to_cbct,

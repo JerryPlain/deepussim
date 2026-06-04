@@ -156,6 +156,45 @@ def surface_raster(mesh, axis: int = 0, span_frac: float = 0.6, cross_frac: floa
     return poses
 
 
+def contact_raster(mesh, contact_points, n_lines: int = 6, n_per_line: int = 16,
+                   expand: float = 1.25, lift_mm: float = 25.0, standoff_mm: float = 2.0,
+                   smooth_radius_mm: float = 8.0, serpentine: bool = True) -> list[np.ndarray]:
+    """Raster the patch of the phantom surface that the real probe actually scanned.
+
+    Unlike :func:`surface_raster` (which targets the mesh's geometric +z top), this is anchored
+    to ``contact_points`` — the real in-contact probe positions, in the **CBCT mm** frame — so the
+    generated poses land on the same face the arm reached (and are reachable). A local tangent
+    frame is fit to the contact cloud by PCA (the two high-variance axes ``u, v`` span the scan
+    plane, the low-variance axis ``w`` is the surface normal, oriented outward); a serpentine grid
+    in that plane — sized to the contact extent times ``expand`` — is lifted ``lift_mm`` above the
+    surface and each guide point projected back onto the mesh with an inward-axial pose. Returns
+    ``n_lines * n_per_line`` poses (``T_cbct_from_probe``, mm) in scan order.
+    """
+    from scipy.spatial import cKDTree
+
+    V = np.asarray(mesh.vertices, dtype=float)
+    tree = cKDTree(V)
+    pts = np.asarray(contact_points, dtype=float)
+    c = pts.mean(0)
+    X = pts - c
+    _, _, Vt = np.linalg.svd(X, full_matrices=False)
+    u, v, w = Vt[0], Vt[1], Vt[2]
+    if w @ (c - V.mean(0)) < 0:                          # orient w outward (away from the interior)
+        w = -w
+    su, sv = X @ u, X @ v
+    half_u = (su.max() - su.min()) / 2.0 * expand
+    half_v = (sv.max() - sv.min()) / 2.0 * expand
+    poses: list[np.ndarray] = []
+    for j, dv in enumerate(np.linspace(-half_v, half_v, n_lines)):
+        row = np.linspace(-half_u, half_u, n_per_line)
+        if serpentine and j % 2 == 1:
+            row = row[::-1]
+        for du in row:
+            guide = c + du * u + dv * v + lift_mm * w
+            poses.append(_pose_from_guide(tree, V, guide, u, standoff_mm, smooth_radius_mm))
+    return poses
+
+
 def top_sweep_endpoints(mesh, axis: int = 0, span_frac: float = 0.6,
                         clearance_mm: float = 20.0):
     """Convenience guide endpoints for a sweep across the mesh's +z-top along ``axis``.

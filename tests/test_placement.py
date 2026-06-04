@@ -4,6 +4,7 @@ from deepussim import geometry as g
 from deepussim.data.volume import Volume
 from deepussim.calib.placement import (
     meters_to_mm,
+    mm_to_meters,
     align_points_placement,
     align_centers_placement,
     sim_pose_to_cbct,
@@ -15,6 +16,13 @@ def test_meters_to_mm_scales_translation_only():
     Tmm = meters_to_mm(T)
     assert np.allclose(Tmm[:3, 3], [100.0, -200.0, 50.0])  # mm
     assert np.allclose(Tmm[:3, :3], T[:3, :3])             # rotation unchanged
+
+
+def test_mm_to_meters_is_the_inverse_of_meters_to_mm():
+    T = g.make_transform(g.rot_z(0.7), [123.0, -45.0, 6.0])  # mm
+    assert np.allclose(mm_to_meters(T)[:3, 3], [0.123, -0.045, 0.006])  # metres
+    assert np.allclose(mm_to_meters(meters_to_mm(T)), T)                # round-trip
+    assert np.allclose(mm_to_meters(T)[:3, :3], T[:3, :3])              # rotation unchanged
 
 
 def test_align_points_maps_anchor_to_anchor():
