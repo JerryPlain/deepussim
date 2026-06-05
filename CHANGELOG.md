@@ -4,6 +4,22 @@ This file tracks meaningful repository changes.
 
 ## [Unreleased]
 
+### infra
+
+- **Apptainer image for the GPU/sim path** (`apptainer/`). Containerizes the
+  version-sensitive `genesis-world` + `torch` + Taichi/CUDA stack so batch runs on
+  NHR@FAU (Alex/Helma) are reproducible; the CPU-only core still runs in the conda
+  env. `deepussim.def` (Python 3.11, PyPI torch wheel = CUDA runtime, `pip install
+  -e .[dev]`, headless GL libs, baked editable so a host `src/` bind = live code);
+  `build.sh` (frontend build, caches→`$WORK`); `run.sh` (`--nv` + live src bind);
+  `job.slurm` (single-GPU Alex example); `apptainer/README.md`. **Built & validated
+  on `alex1`**: image 3.7 GB, pinned `torch==2.12.0+cu130` / `genesis-world==1.1.0`,
+  `56 passed` in-container. **GPU sim verified** via `srun` on an A40 (driver
+  595.71.05 / CUDA 13.2 — cu130 compatible): `smoke_sim.py` ran on the `gs.cuda`
+  backend, probe contacted the phantom (`|f| = 33.6 N`), ~900 FPS after kernel
+  compile. (Harmless `libEGL dri2` warnings from Genesis' offscreen visualizer;
+  physics + the numpy US render are unaffected.)
+
 ## 2026-06-04 — Correct the placement to belly-up; sim trajectory generation
 
 **Commits:** `8b45433`

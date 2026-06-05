@@ -233,6 +233,23 @@ The geometric core (`geometry`, `us.reslice`, `us.renderer`, `calib.registration
 only needs numpy/scipy and runs without Genesis installed. The `sim` package imports
 Genesis lazily, so the rest of the package is importable without it.
 
+### HPC / Apptainer (NHR@FAU)
+
+For reproducible GPU/sim runs on the cluster (Alex/Helma), the brittle
+`genesis-world` + `torch` + CUDA stack is containerized in [`apptainer/`](apptainer/).
+Build on a frontend, then run with the GPU:
+
+```bash
+export WORK=/path/to/your/work
+bash apptainer/build.sh                                   # → $WORK/deepussim.sif
+apptainer/run.sh python scripts/smoke_sim.py              # --nv + live src bind
+sbatch apptainer/job.slurm                                # single-GPU batch run
+```
+
+The conda env above is still fine for the CPU-only core. See
+[`apptainer/README.md`](apptainer/README.md) for build/run/Slurm details and the
+one CUDA/driver caveat (container CUDA must match Alex's host driver).
+
 ## Reproduce
 
 All commands assume the conda env above is active. The data files (CBCT, rosbags, phantom

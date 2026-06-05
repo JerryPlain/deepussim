@@ -1,0 +1,87 @@
+Bootstrap: docker
+From: python:3.11-slim-bookworm
+
+# deepussim — Apptainer image for the GPU/sim path (Genesis + torch + CUDA).
+#
+# Why a container: the genesis-world + torch + Taichi(CUDA) stack is brittle and
+# version-sensitive (kernels are JIT-compiled at run time). Baking it into a .sif
+# pins it once and makes batch runs on Alex/Helma reproducible. The CPU-only parts
+# of deepussim (reslice / render / tests) don't need this — a conda env is fine.
+#
+# Build (on an AlmaLinux frontend: Alex / Helma / Fritz / Woody / Meggie):
+#     apptainer build deepussim.sif deepussim.def
+#   (permission error? use:  /apps/singularity/apptainer-wrapper.sh build deepussim.sif deepussim.def )
+#
+# Run with GPU:
+#     apptainer run --nv deepussim.sif python scripts/run_scaleup.py --sim ...
+#
+# Python is pinned to 3.11 because genesis-world supports 3.10–3.12 (NOT 3.13).
+
+%files
+    # Bake the project in (NOT /data — raw scans & datasets stay on $WORK and are
+    # bind-mounted at run time). Editable-installed below so a host bind of
+    # src/ over /opt/deepussim/src gives live code without a rebuild.
+    pyproject.toml /opt/deepussim/pyproject.toml
+    README.md      /opt/deepussim/README.md
+    src            /opt/deepussim/src
+    configs        /opt/deepussim/configs
+    scripts        /opt/deepussim/scripts
+
+%post
+    set -eux
+
+    # --- system libraries -------------------------------------------------
+    # build-essential: Taichi / native wheels may compile on first run.
+    # libgl1 / libegl1 / libosmesa6 / libglib2.0-0 / X libs: Genesis' offscreen
+    # render camera (pyrender/OpenGL) needs a GL stack even with --headless.
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        git ca-certificates build-essential \
+        libgl1 libegl1 libgles2 libosmesa6 libglib2.0-0 \
+        libx11-6 libxext6 libxrender1 libsm6 libgomp1
+    rm -rf /var/lib/apt/lists/*
+
+    python -m pip install --no-cache-dir --upgrade pip wheel setuptools
+
+    # --- CUDA / torch -----------------------------------------------------
+    # Default: the PyPI torch wheel (bundles a recent CUDA runtime; the host
+    # NVIDIA driver is supplied at run time by `apptainer run --nv`). This is
+    # exactly the path README verified ("pip install torch").
+    #
+    # If `--nv` later fails with a "driver too old / CUDA <x> not supported"
+    # error, pin an older CUDA wheel matching Alex's driver (`nvidia-smi`), e.g.:
+    #     TORCH_PIP="torch --index-url https://download.pytorch.org/whl/cu124"
+    TORCH_PIP="torch"
+    pip install --no-cache-dir ${TORCH_PIP}
+
+    # --- deepussim + deps (editable, with dev extras) ---------------------
+    cd /opt/deepussim
+    pip install --no-cache-dir -e ".[dev]"
+
+    # Pin the resolved Genesis/torch for the record (also printed at build time).
+    pip freeze | grep -Ei 'genesis-world|^torch==' > /opt/deepussim/PINNED.txt || true
+    cat /opt/deepussim/PINNED.txt
+
+%environment
+    # Headless / offscreen rendering and unbuffered logs for Slurm.
+    export PYTHONUNBUFFERED=1
+    export MPLBACKEND=Agg
+    export PYOPENGL_PLATFORM=egl
+    # Make the baked project importable even if cwd isn't the repo.
+    export PYTHONPATH=/opt/deepussim/src:${PYTHONPATH:-}
+
+%runscript
+    # `apptainer run --nv deepussim.sif <cmd...>` runs <cmd>; no args → a shell.
+    if [ "$#" -eq 0 ]; then
+        exec /bin/bash
+    fi
+    exec "$@"
+
+%labels
+    org.deepussim.purpose "Genesis-based ultrasound sim — GPU/sim path"
+    org.deepussim.python   "3.11"
+
+%help
+    deepussim GPU/sim container. Build on an Alex/Helma frontend, run with --nv.
+    See apptainer/README.md for build/run/Slurm instructions.
