@@ -23,6 +23,34 @@ from ..us.renderer import RendererParams, render
 from ..calib.placement import sim_pose_to_cbct
 
 
+def pose_convergence(T_target: np.ndarray, T_achieved: np.ndarray) -> tuple[float, float, float]:
+    """How far the *achieved* probe pose landed from its *nominal target*.
+
+    The error is decomposed in the target's own frame, because the servo *intends* to
+    press along the probe axial (``servo_to_force`` modulates depth by up to its clip):
+
+      - ``lateral_mm`` — translation error perpendicular to the target axial (+z). This is
+        the IK in-plane miss; it must be tiny for the slice to image the intended spot.
+      - ``axial_mm``   — |translation error| along the target axial. Legitimately non-zero
+        (the press depth), so this is allowed a wide tolerance, not required to be ~0.
+      - ``rot_deg``    — angle between the achieved and target orientations.
+
+    Inputs are 4x4 poses in a common frame (sim world); ``*_mm`` are in that frame's units
+    times 1000 (so metres -> mm). A far-stalled / unreachable pose blows up lateral_mm and
+    rot_deg while a genuine press only grows axial_mm.
+    """
+    T_target = np.asarray(T_target, dtype=float)
+    T_achieved = np.asarray(T_achieved, dtype=float)
+    axial = T_target[:3, 2] / (np.linalg.norm(T_target[:3, 2]) + 1e-12)  # +z = into tissue
+    d = T_achieved[:3, 3] - T_target[:3, 3]
+    d_axial = float(d @ axial)
+    lateral = float(np.linalg.norm(d - d_axial * axial))
+    # geodesic angle between rotations: arccos((tr(Ra^T Rb) - 1) / 2)
+    cos = (np.trace(T_target[:3, :3].T @ T_achieved[:3, :3]) - 1.0) / 2.0
+    rot_deg = float(np.degrees(np.arccos(np.clip(cos, -1.0, 1.0))))
+    return lateral * 1000.0, abs(d_axial) * 1000.0, rot_deg
+
+
 def generate_dataset(
     out_dir,
     volume: Volume,
@@ -34,6 +62,9 @@ def generate_dataset(
     sim_to_cbct: np.ndarray | None = None,
     settle_steps: int = 50,
     force_target_n: float | None = None,
+    reach_lateral_mm: float = 8.0,
+    reach_axial_mm: float = 40.0,
+    reach_rot_deg: float = 10.0,
     progress: bool = True,
 ) -> int:
     """Generate and write samples for ``poses``. Returns the number written.
@@ -46,6 +77,15 @@ def generate_dataset(
         frame via ``sim_to_cbct`` (T_cbct_from_simworld, mm) before reslicing — this is
         the sim->reslice bridge (see calib.placement). ``sim_to_cbct`` is required when
         ``scene`` is given.
+
+    A pose is written only if the probe both **made contact** and **reached its target**:
+    contact alone is a false-positive gate — an unreachable pose where IK stalls far away
+    but some arm link grazes the phantom still registers force, and reslicing the (far-off)
+    *achieved* pose would write an off-anatomy sample. ``reach_*`` bound the achieved-vs-
+    target deviation (see :func:`pose_convergence`): ``reach_lateral_mm`` / ``reach_rot_deg``
+    must be small (IK landed where we aimed, pointed right), while ``reach_axial_mm`` is wide
+    (the servo presses along the axial on purpose). Dropped poses are counted and logged
+    with their reason rather than silently skipped.
     """
     if scene is not None and sim_to_cbct is None:
         raise ValueError("sim_to_cbct (T_cbct_from_simworld) is required when scene is given")
@@ -59,9 +99,10 @@ def generate_dataset(
         except ImportError:
             pass
 
+    dropped = {"no_contact": 0, "not_reached": 0}  # auditable drop reasons (sim path)
     with DatasetWriter(out_dir, meta={"geometry": geom.__dict__}) as writer:
         # for each candidate pose, drive the sim (if given), reslice, render, and write a Sample
-        for idx, T_nominal in enumerate(iterator): 
+        for idx, T_nominal in enumerate(iterator):
             force = None
             meta = {"index": idx, "source": "sim" if scene is not None else "reslice"}
             # default reslice pose is the nominal target (sim world, m) mapped into CBCT (mm) if sim given, else just the pose (CBCT, mm)
@@ -69,7 +110,7 @@ def generate_dataset(
 
             if scene is not None:
                 T_nom = np.asarray(T_nominal, dtype=float) # if sim: nominal target pose in sim world (m)
-                
+
                 # move the sim probe there, check contact, get the achieved pose + force from the sim physics
                 if force_target_n is not None and hasattr(scene, "servo_to_force"):
                     scene.servo_to_force(T_nom, target_n=force_target_n)  # hold a realistic force
@@ -81,9 +122,21 @@ def generate_dataset(
                     scene.step(settle_steps)
                     contacted = scene.in_contact()
                 if not contacted:
-                    continue  # unreachable / no contact -> drop
-        
+                    dropped["no_contact"] += 1
+                    continue  # no force on any link -> drop
+
                 pose_sim = scene.probe_pose() # achieved probe pose in sim world (m)
+                # GATE: contact alone is a false positive — an unreachable pose where IK stalls
+                # far off but an arm link grazes the phantom still registers force. Require the
+                # probe to have actually reached its target (small lateral/rot miss; axial press
+                # allowed) before trusting the achieved pose to reslice.
+                lateral_mm, axial_mm, rot_deg = pose_convergence(T_nom, pose_sim)
+                meta["reach"] = {"lateral_mm": lateral_mm, "axial_mm": axial_mm, "rot_deg": rot_deg}
+                if (lateral_mm > reach_lateral_mm or axial_mm > reach_axial_mm
+                        or rot_deg > reach_rot_deg):
+                    dropped["not_reached"] += 1
+                    continue  # probe stalled / off-target -> would write an off-anatomy sample
+
                 force = scene.contact_force() # Newtons, if available (else None)
                 reslice_pose = sim_pose_to_cbct(pose_sim, sim_to_cbct)  # CBCT, mm
                 meta["pose_sim_m"] = pose_sim.tolist()
@@ -108,4 +161,10 @@ def generate_dataset(
             writer.add(Sample(image=image, pose=reslice_pose, mask=mask,
                               force=force, meta=meta))
 
-        return len(writer)
+        n = len(writer)
+        if scene is not None and (dropped["no_contact"] or dropped["not_reached"]):
+            total = n + dropped["no_contact"] + dropped["not_reached"]
+            print(f"scale-up: wrote {n}/{total} poses "
+                  f"(dropped {dropped['no_contact']} no-contact, "
+                  f"{dropped['not_reached']} not-reached)")
+        return n
