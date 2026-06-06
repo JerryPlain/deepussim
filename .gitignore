@@ -38,6 +38,8 @@ outputs/
 runs/
 *.png
 !docs/**/*.png
+# Visualization figures are tracked intentionally (PNG/PDF/GIF under figures/).
+!figures/**/*.png
 
 # OS / editor
 .DS_Store
