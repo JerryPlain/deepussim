@@ -20,6 +20,7 @@ SIF="${DEEPUSSIM_SIF:-${WORK:-$REPO}/deepussim.sif}"
 [ -f "$SIF" ] || { echo "missing image: $SIF (build it: apptainer/build.sh)"; exit 1; }
 
 exec apptainer run --nv \
+    --bind "$REPO" \
     --bind "$REPO/src:/opt/deepussim/src" \
     --pwd "$REPO" \
     "$SIF" "$@"

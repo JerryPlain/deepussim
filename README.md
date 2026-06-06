@@ -242,13 +242,33 @@ Build on a frontend, then run with the GPU:
 ```bash
 export WORK=/path/to/your/work
 bash apptainer/build.sh                                   # → $WORK/deepussim.sif
-apptainer/run.sh python scripts/smoke_sim.py              # --nv + live src bind
-sbatch apptainer/job.slurm                                # single-GPU batch run
+apptainer/run.sh python scripts/smoke_sim.py             # --nv + live src bind
 ```
 
 The conda env above is still fine for the CPU-only core. See
-[`apptainer/README.md`](apptainer/README.md) for build/run/Slurm details and the
+[`apptainer/README.md`](apptainer/README.md) for build/run details and the
 one CUDA/driver caveat (container CUDA must match Alex's host driver).
+
+### SLURM pipeline (Alex)
+
+Batch GPU jobs live in [`scripts/slurm/`](scripts/slurm/) (named
+`<stage-or-component>_<task>.slurm`; see [`scripts/slurm/README.md`](scripts/slurm/README.md)).
+Each runs inside the Apptainer image and is submitted from the repo root:
+
+```bash
+sbatch scripts/slurm/scaleup_sim.slurm                   # Stage 1: sim scale-up dataset
+```
+
+| Job | Stage | Produces | Override (env) |
+|---|---|---|---|
+| `scaleup_sim.slurm` | 1 · scale-up | (US image, pose, anatomy mask, **contact force**) per reached+contacting pose | `TRAJ`=contact\|replay, `N`, `FORCE_N`, `OUT` |
+
+> `--sim` adds **force / contact / reachability** only — the US *appearance* is the
+> placeholder renderer regardless. Making the image look real is the learned-renderer
+> job (planned: `renderer_train.slurm`), not this one.
+
+The conda env / no-`--sim` path (`scripts/run_scaleup.py` without `--sim`) produces the
+same dataset minus force on CPU — fine for a quick look without the cluster.
 
 ## Reproduce
 

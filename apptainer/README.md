@@ -15,8 +15,9 @@ Reference: <https://doc.nhr.fau.de/environment/apptainer/>
 |---|---|
 | `deepussim.def` | Image definition (Python 3.11, torch+CUDA, `pip install -e .[dev]`) |
 | `build.sh` | Build `deepussim.sif` on a frontend, caches → `$WORK` |
-| `run.sh` | `apptainer run --nv` + live `src/` bind + `--pwd` repo |
-| `job.slurm` | Single-GPU Slurm example for Alex |
+| `run.sh` | `apptainer run --nv` + live `src/` bind + repo bind + `--pwd` repo |
+
+SLURM batch jobs live in [`scripts/slurm/`](../scripts/slurm/) (e.g. `scaleup_sim.slurm`).
 
 ## 1. Build (on a frontend node)
 
@@ -51,11 +52,13 @@ For a **frozen** run off the baked code (true reproducibility), drop the `src` b
 ## 3. Batch (Slurm)
 
 ```bash
-sbatch apptainer/job.slurm
+sbatch scripts/slurm/scaleup_sim.slurm
 ```
 
-Edit the CBCT paths at the top first. It's a **single-node** GPU job — NHR@FAU
-advises against MPI-in-container, and deepussim's sim is single-GPU anyway.
+Defaults read inputs from the repo's `data/`; override with env vars
+(`TRAJ`/`N`/`FORCE_N`/`OUT`/…) — see [`scripts/slurm/README.md`](../scripts/slurm/README.md).
+It's a **single-node** GPU job — NHR@FAU advises against MPI-in-container, and
+deepussim's sim is single-GPU anyway.
 
 ## CUDA / driver compatibility — the one thing to watch
 
