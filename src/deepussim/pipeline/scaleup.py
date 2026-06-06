@@ -23,6 +23,21 @@ from ..us.renderer import RendererParams, render
 from ..calib.placement import sim_pose_to_cbct
 
 
+def slice_coverage(intensity: np.ndarray) -> float:
+    """Fraction of the resliced fan that imaged actual tissue (0 = empty, ~1 = full).
+
+    An off-anatomy / out-of-volume reslice (e.g. an edge pose whose fan exits the body)
+    comes back near-uniform — out-of-bounds samples are a constant, so the slice has almost
+    no dynamic range. Measure the fraction of pixels rising above the slice's own floor;
+    a (near-)uniform slice scores ~0 and can be dropped before it pollutes the dataset.
+    """
+    x = np.asarray(intensity, dtype=float)
+    lo, hi = float(x.min()), float(x.max())
+    if hi - lo < 1e-6:                       # uniform -> nothing imaged
+        return 0.0
+    return float(np.mean(x > lo + 0.05 * (hi - lo)))
+
+
 def pose_convergence(T_target: np.ndarray, T_achieved: np.ndarray) -> tuple[float, float, float]:
     """How far the *achieved* probe pose landed from its *nominal target*.
 
@@ -65,6 +80,7 @@ def generate_dataset(
     reach_lateral_mm: float = 8.0,
     reach_axial_mm: float = 40.0,
     reach_rot_deg: float = 10.0,
+    min_coverage: float = 0.05,
     progress: bool = True,
 ) -> int:
     """Generate and write samples for ``poses``. Returns the number written.
@@ -84,8 +100,10 @@ def generate_dataset(
     *achieved* pose would write an off-anatomy sample. ``reach_*`` bound the achieved-vs-
     target deviation (see :func:`pose_convergence`): ``reach_lateral_mm`` / ``reach_rot_deg``
     must be small (IK landed where we aimed, pointed right), while ``reach_axial_mm`` is wide
-    (the servo presses along the axial on purpose). Dropped poses are counted and logged
-    with their reason rather than silently skipped.
+    (the servo presses along the axial on purpose). Separately, a pose whose resliced fan
+    imaged (almost) no tissue — coverage below ``min_coverage`` (see :func:`slice_coverage`),
+    e.g. an edge pose whose fan exits the body — is dropped before writing. Dropped poses are
+    counted and logged by reason (no-contact / not-reached / empty) rather than silently kept.
     """
     if scene is not None and sim_to_cbct is None:
         raise ValueError("sim_to_cbct (T_cbct_from_simworld) is required when scene is given")
@@ -99,7 +117,7 @@ def generate_dataset(
         except ImportError:
             pass
 
-    dropped = {"no_contact": 0, "not_reached": 0}  # auditable drop reasons (sim path)
+    dropped = {"no_contact": 0, "not_reached": 0, "empty": 0}  # auditable drop reasons
     with DatasetWriter(out_dir, meta={"geometry": geom.__dict__}) as writer:
         # for each candidate pose, drive the sim (if given), reslice, render, and write a Sample
         for idx, T_nominal in enumerate(iterator):
@@ -141,8 +159,12 @@ def generate_dataset(
                 reslice_pose = sim_pose_to_cbct(pose_sim, sim_to_cbct)  # CBCT, mm
                 meta["pose_sim_m"] = pose_sim.tolist()
             
-            # reslice + render the US image at the reslice pose, and the label mask if given
-            intensity = reslice_volume(volume, reslice_pose, geom, order=1) # get a 2D slice of the intensity volume at the reslice pose
+            # reslice the intensity at the reslice pose; drop poses whose fan imaged (almost)
+            # no tissue — e.g. an edge pose whose fan exits the body — before rendering/writing.
+            intensity = reslice_volume(volume, reslice_pose, geom, order=1)
+            if slice_coverage(intensity) < min_coverage:
+                dropped["empty"] += 1
+                continue
             image = render(intensity, geom, params) # render the resliced intensity into a US image (with depth-dependent brightness, etc)
 
             # reslice the label volume at the same pose, if given, to get a mask of the anatomy visible in the image (nearest-neighbour to preserve discrete labels)
@@ -162,9 +184,9 @@ def generate_dataset(
                               force=force, meta=meta))
 
         n = len(writer)
-        if scene is not None and (dropped["no_contact"] or dropped["not_reached"]):
-            total = n + dropped["no_contact"] + dropped["not_reached"]
-            print(f"scale-up: wrote {n}/{total} poses "
+        n_dropped = sum(dropped.values())
+        if n_dropped:
+            print(f"scale-up: wrote {n}/{n + n_dropped} poses "
                   f"(dropped {dropped['no_contact']} no-contact, "
-                  f"{dropped['not_reached']} not-reached)")
+                  f"{dropped['not_reached']} not-reached, {dropped['empty']} empty)")
         return n

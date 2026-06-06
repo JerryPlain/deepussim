@@ -212,7 +212,7 @@ def _nearest_rotation(pose_tree, rotations, query):
 
 
 def contact_raster_ee(mesh, contact_poses, n_lines: int = 6, n_per_line: int = 16,
-                      expand: float = 1.25, lift_mm: float = 25.0, standoff_mm: float = 2.0,
+                      expand: float = 1.0, lift_mm: float = 25.0, standoff_mm: float = 2.0,
                       serpentine: bool = True) -> list[np.ndarray]:
     """Raster the scanned patch, orienting each pose from the nearest **real EE pose**.
 

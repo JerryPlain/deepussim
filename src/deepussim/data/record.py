@@ -55,11 +55,20 @@ def load_sample(path) -> Sample:
 
 
 class DatasetWriter:
-    """Append-only writer producing ``<out_dir>/sample_000000.npz`` + ``index.json``."""
+    """Writer producing ``<out_dir>/sample_000000.npz`` + ``index.json``.
+
+    Writes samples numbered from 0, so re-running into an existing directory would leave
+    orphaned higher-numbered files from a longer previous run (index.json stays correct, but a
+    glob of the dir would see stale samples). The writer therefore clears existing
+    ``sample_*.npz`` + ``index.json`` on open so the directory always reflects exactly this run.
+    """
 
     def __init__(self, out_dir, meta: dict | None = None):
         self.out_dir = Path(out_dir)
         self.out_dir.mkdir(parents=True, exist_ok=True)
+        for f in self.out_dir.glob("sample_*.npz"):      # drop any stale samples from a prior run
+            f.unlink()
+        (self.out_dir / "index.json").unlink(missing_ok=True)
         self.index: list[dict] = []
         self.dataset_meta = meta or {}
         self._n = 0

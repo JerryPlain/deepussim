@@ -10,7 +10,8 @@ from deepussim import geometry as g
 from deepussim.data.volume import Volume
 from deepussim.us.reslice import ProbeGeometry
 from deepussim.calib.placement import meters_to_mm
-from deepussim.pipeline.scaleup import pose_convergence, generate_dataset
+from deepussim.pipeline.scaleup import pose_convergence, generate_dataset, slice_coverage
+from deepussim.data.record import DatasetWriter, Sample
 
 
 # --- pose_convergence: error decomposed in the target frame ---------------------------
@@ -85,10 +86,12 @@ class _FakeScene:
 
 
 def _toy_inputs():
-    vol = Volume(np.random.default_rng(0).random((40, 40, 40)), np.eye(4))
+    # Volume large enough that a legitimate axial press still images inside it (so the
+    # empty-slice filter doesn't fire on a genuinely-reached pose).
+    vol = Volume(np.random.default_rng(0).random((80, 80, 80)) + 0.5, np.eye(4))
     geom = ProbeGeometry(radius_mm=20.0, fov_deg=60.0, depth_mm=15.0, n_lat=16, n_ax=24)
     sim_to_cbct = meters_to_mm(g.identity())  # sim metres -> CBCT mm, no rotation/offset
-    nominal = g.from_translation([0.020, 0.020, 0.020])  # target probe pose (m)
+    nominal = g.from_translation([0.040, 0.040, 0.020])  # target probe pose (m), well inside
     return vol, geom, sim_to_cbct, nominal
 
 
@@ -126,4 +129,40 @@ def test_axial_press_within_tolerance_is_kept(tmp_path):
     scene = _FakeScene(achieved=pressed, contacted=True)
     n = generate_dataset(tmp_path, vol, [nominal], geom, scene=scene,
                          sim_to_cbct=sim_to_cbct, force_target_n=5.0, progress=False)
+    assert n == 1
+
+
+# --- empty-slice filter ---------------------------------------------------------------
+
+def test_slice_coverage_uniform_is_zero():
+    assert slice_coverage(np.zeros((10, 10))) == 0.0
+    assert slice_coverage(np.full((10, 10), 3.0)) == 0.0
+
+
+def test_slice_coverage_half_filled():
+    x = np.zeros((10, 10)); x[:5] = 1.0     # half the fan imaged tissue
+    assert 0.3 < slice_coverage(x) < 0.7
+
+
+def test_writer_clears_stale_samples_on_rerun(tmp_path):
+    # A longer run then a shorter run into the same dir must not leave orphaned samples.
+    img = np.zeros((4, 4), dtype=float); pose = np.eye(4)
+    with DatasetWriter(tmp_path) as w:
+        for _ in range(5):
+            w.add(Sample(image=img, pose=pose))
+    assert len(list(tmp_path.glob("sample_*.npz"))) == 5
+    with DatasetWriter(tmp_path) as w:
+        for _ in range(2):
+            w.add(Sample(image=img, pose=pose))
+    assert len(list(tmp_path.glob("sample_*.npz"))) == 2   # the 3 stale ones are gone
+
+
+def test_empty_off_volume_pose_is_dropped(tmp_path):
+    # No-sim path: a pose whose fan lands inside the volume is kept; one far outside (uniform
+    # out-of-bounds fill -> zero coverage) is dropped before writing.
+    vol = Volume(np.random.default_rng(0).random((40, 40, 40)) + 0.5, np.eye(4))
+    geom = ProbeGeometry(radius_mm=20.0, fov_deg=60.0, depth_mm=15.0, n_lat=16, n_ax=24)
+    inside = g.from_translation([20.0, 20.0, 5.0])         # fan images the volume
+    outside = g.from_translation([500.0, 500.0, 500.0])    # fan exits -> empty
+    n = generate_dataset(tmp_path, vol, [inside, outside], geom, progress=False)
     assert n == 1
