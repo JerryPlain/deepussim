@@ -78,8 +78,14 @@ def main() -> None:
             parts["d"] = float(d.detach())
             for k, v in parts.items():
                 agg[k] = agg.get(k, 0.0) + v
-        msg = "  ".join(f"{k}={agg[k] / len(dl):.3f}" for k in sorted(agg))
+        means = {k: agg[k] / len(dl) for k in agg}
+        msg = "  ".join(f"{k}={means[k]:.3f}" for k in sorted(means))
         print(f"epoch {epoch:4d}/{args.epochs}  {msg}  ({time.time() - t0:.1f}s)", flush=True)
+        csv = out / "losses.csv"
+        if epoch == 1:
+            csv.write_text("epoch," + ",".join(sorted(means)) + "\n")
+        with csv.open("a") as fh:
+            fh.write(f"{epoch}," + ",".join(f"{means[k]:.5f}" for k in sorted(means)) + "\n")
 
         if epoch % args.sample_every == 0 or epoch == args.epochs:
             model.eval()
