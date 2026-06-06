@@ -195,6 +195,72 @@ def contact_raster(mesh, contact_points, n_lines: int = 6, n_per_line: int = 16,
     return poses
 
 
+# --- EE-oriented surface raster (orientation from real poses, NOT mesh normals) ----------
+# WHY: on the real rig the probe presses straight down (its axial varies <0.6deg over a whole
+# sweep) — it does NOT follow the local surface normal. Measured against the real EE poses,
+# both the per-point PCA normal and the mesh-native normal disagree with the real probe axial
+# (|dot|~0.6, only ~30% within ~37deg), so a mesh-normal-oriented raster aims the probe wrongly.
+# Here orientation is borrowed from the nearest real probe pose; the mesh is used ONLY to
+# project each guide onto the surface and set the standoff. With today's near-constant data this
+# is ~one fixed downward orientation; once tilt-diverse poses are collected, generated poses
+# near a tilted region inherit that tilt automatically.
+
+
+def _nearest_rotation(pose_tree, rotations, query):
+    """Rotation (3x3) of the real probe pose nearest ``query`` (position-space k=1)."""
+    return rotations[pose_tree.query(query)[1]]
+
+
+def contact_raster_ee(mesh, contact_poses, n_lines: int = 6, n_per_line: int = 16,
+                      expand: float = 1.25, lift_mm: float = 25.0, standoff_mm: float = 2.0,
+                      serpentine: bool = True) -> list[np.ndarray]:
+    """Raster the scanned patch, orienting each pose from the nearest **real EE pose**.
+
+    ``contact_poses`` are the real in-contact probe poses (``T_cbct_from_probe``, 4x4, mm) —
+    e.g. ``sim_pose_to_cbct(compose(frame.pose, T_EE_FROM_PROBE), sim_to_cbct)`` per contact
+    frame. Their positions define the scan plane (PCA, as in :func:`contact_raster`); their
+    rotations define the probe orientation (the mesh normal is deliberately not used — see the
+    note above). A serpentine grid in the plane is lifted ``lift_mm`` above the surface, each
+    guide projected onto the mesh, and a pose built there with the nearest real pose's rotation,
+    sitting ``standoff_mm`` outside the surface along its (outward) axial. Returns
+    ``n_lines * n_per_line`` poses (``T_cbct_from_probe``, mm) in scan order.
+    """
+    from scipy.spatial import cKDTree
+
+    V = np.asarray(mesh.vertices, dtype=float)
+    surf_tree = cKDTree(V)
+    poses_in = np.asarray(contact_poses, dtype=float)
+    if poses_in.ndim != 3 or poses_in.shape[1:] != (4, 4):
+        raise ValueError(f"contact_poses must be (N,4,4), got {poses_in.shape}")
+    pts = poses_in[:, :3, 3]
+    rots = poses_in[:, :3, :3]
+    pose_tree = cKDTree(pts)
+
+    c = pts.mean(0)
+    X = pts - c
+    _, _, Vt = np.linalg.svd(X, full_matrices=False)
+    u, v, w = Vt[0], Vt[1], Vt[2]
+    if w @ (c - V.mean(0)) < 0:                          # orient w outward (away from interior)
+        w = -w
+    su, sv = X @ u, X @ v
+    half_u = (su.max() - su.min()) / 2.0 * expand
+    half_v = (sv.max() - sv.min()) / 2.0 * expand
+
+    poses: list[np.ndarray] = []
+    for j, dv in enumerate(np.linspace(-half_v, half_v, n_lines)):
+        row = np.linspace(-half_u, half_u, n_per_line)
+        if serpentine and j % 2 == 1:
+            row = row[::-1]
+        for du in row:
+            guide = c + du * u + dv * v + lift_mm * w
+            surface_pt = V[surf_tree.query(guide)[1]]
+            R = _nearest_rotation(pose_tree, rots, surface_pt)
+            axial = R[:, 2] / (np.linalg.norm(R[:, 2]) + 1e-12)   # +z into tissue
+            pos = surface_pt - standoff_mm * axial                # rest standoff outside surface
+            poses.append(make_transform(R, pos))
+    return poses
+
+
 def top_sweep_endpoints(mesh, axis: int = 0, span_frac: float = 0.6,
                         clearance_mm: float = 20.0):
     """Convenience guide endpoints for a sweep across the mesh's +z-top along ``axis``.

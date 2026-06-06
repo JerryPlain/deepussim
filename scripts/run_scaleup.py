@@ -31,7 +31,7 @@ from deepussim.data.volume import load_volume
 from deepussim.us.reslice import ProbeGeometry
 from deepussim.us.renderer import RendererParams
 from deepussim.pipeline.sampling import (
-    linear_sweep, surface_sweep, surface_raster, contact_raster, top_sweep_endpoints,
+    linear_sweep, surface_sweep, surface_raster, contact_raster_ee, top_sweep_endpoints,
 )
 from deepussim.pipeline.scaleup import generate_dataset
 
@@ -188,12 +188,14 @@ def main() -> None:
         nominal_cbct = [sim_pose_to_cbct(p, sim_to_cbct) for p in sim_poses]
     elif args.trajectory == "contact":
         # generate a reachable raster over the face the arm actually scanned: map the real
-        # contacts into the CBCT frame, fit a patch there, and densify (the surface/raster +z-top
-        # samplers land on a different, often-unreachable face).
-        rc = np.array([sim_pose_to_cbct(compose(f.pose, T_EE_FROM_PROBE), sim_to_cbct)[:3, 3]
-                       for f in frames])
-        nominal_cbct = contact_raster(mesh, rc, n_lines=args.lines, n_per_line=args.per_line,
-                                      standoff_mm=args.standoff_mm)
+        # contact *poses* into the CBCT frame, fit a patch there, and densify (the surface/raster
+        # +z-top samplers land on a different, often-unreachable face). Orientation is taken from
+        # the real EE poses, not mesh normals — the real probe presses straight down and does not
+        # follow the local surface normal (see sampling.contact_raster_ee).
+        rc_poses = np.array([sim_pose_to_cbct(compose(f.pose, T_EE_FROM_PROBE), sim_to_cbct)
+                             for f in frames])
+        nominal_cbct = contact_raster_ee(mesh, rc_poses, n_lines=args.lines,
+                                         n_per_line=args.per_line, standoff_mm=args.standoff_mm)
         sim_poses = [compose(T_world_from_cbctm, mm_to_meters(T)) for T in nominal_cbct]
     else:
         # a generated CBCT-frame trajectory, mapped into the sim world to drive the arm

@@ -73,8 +73,8 @@ def _decimate(mesh, target_faces=3500):
     return None
 
 
-def _contact_points_cbct(mesh, bags):
-    """The real in-contact probe positions, mapped into the CBCT mm frame (via the placement)."""
+def _contact_poses_cbct(mesh, bags):
+    """The real in-contact probe poses (4x4), mapped into the CBCT mm frame (via the placement)."""
     from deepussim.data.rosbag import extract_sequence
     from deepussim.calib import T_WORLD_FROM_CBCT, T_EE_FROM_PROBE, seat_phantom_placement
     from deepussim.calib.placement import meters_to_mm, sim_pose_to_cbct
@@ -85,17 +85,17 @@ def _contact_points_cbct(mesh, bags):
         raise SystemExit(f"no contact frames in {bags}")
     face = np.array([compose(f.pose, T_EE_FROM_PROBE)[:3, 3] for f in frames])
     s2c = meters_to_mm(invert(seat_phantom_placement(mesh, face, T_WORLD_FROM_CBCT)))
-    return np.array([sim_pose_to_cbct(compose(f.pose, T_EE_FROM_PROBE), s2c)[:3, 3] for f in frames])
+    return np.array([sim_pose_to_cbct(compose(f.pose, T_EE_FROM_PROBE), s2c) for f in frames])
 
 
 def build_trajectory(args, mesh):
-    from deepussim.pipeline.sampling import (surface_raster, surface_sweep, contact_raster,
+    from deepussim.pipeline.sampling import (surface_raster, surface_sweep, contact_raster_ee,
                                              top_sweep_endpoints)
 
     if args.trajectory == "contact":
-        rc = _contact_points_cbct(mesh, args.bags)
-        return contact_raster(mesh, rc, n_lines=args.lines, n_per_line=args.per_line,
-                              standoff_mm=args.standoff_mm)
+        rc_poses = _contact_poses_cbct(mesh, args.bags)
+        return contact_raster_ee(mesh, rc_poses, n_lines=args.lines, n_per_line=args.per_line,
+                                 standoff_mm=args.standoff_mm)
     if args.trajectory == "raster":
         return surface_raster(mesh, axis=args.sweep_axis, span_frac=args.span_frac,
                               cross_frac=args.cross_frac, n_lines=args.lines,

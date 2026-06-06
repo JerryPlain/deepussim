@@ -2,8 +2,10 @@
 import numpy as np
 import pytest
 
-from deepussim.pipeline.sampling import linear_sweep, surface_sweep, surface_raster
-from deepussim.geometry import is_rigid
+from deepussim.pipeline.sampling import (
+    linear_sweep, surface_sweep, surface_raster, contact_raster_ee,
+)
+from deepussim.geometry import is_rigid, make_transform
 
 
 def test_linear_sweep_endpoints_and_orientation():
@@ -57,3 +59,38 @@ def test_surface_raster_covers_a_2d_patch():
         p = T[:3, 3]
         assert R - 1.0 < np.linalg.norm(p) < R + standoff + 2.0   # on the sphere + standoff
         assert T[:3, 2] @ (-p / np.linalg.norm(p)) > 0.9          # axial points inward
+
+
+def test_contact_raster_ee_orientation_follows_real_poses_not_mesh_normal():
+    """The real probe presses straight DOWN; generated poses must inherit that orientation,
+    NOT the local surface normal (which on a sphere points radially)."""
+    trimesh = pytest.importorskip("trimesh")
+    pytest.importorskip("scipy")
+    R, standoff = 50.0, 2.0
+    mesh = trimesh.creation.icosphere(subdivisions=3, radius=R)
+    # Real contact poses near the +z cap, ALL aiming straight down (axial = -z) — the rig's
+    # fixed downward press. Their positions form a small patch on the cap; their orientation
+    # deliberately does NOT match the (radial) sphere normal except exactly at the pole.
+    z = np.array([0.0, 0.0, -1.0]); x = np.array([1.0, 0.0, 0.0]); y = np.cross(z, x)
+    down = make_transform(np.column_stack([x, y, z]), [0, 0, 0])   # right-handed, axial = -z
+    # Patch on the +x SIDE of the sphere: there the surface normal points ~+x, but the real
+    # poses still aim straight DOWN — so axial vs mesh-normal are unmistakably different.
+    ys = np.linspace(-12, 12, 6); zs = np.linspace(-8, 8, 4)
+    contact_poses = []
+    for yy in ys:
+        for zz in zs:
+            xx = np.sqrt(max(R**2 - yy**2 - zz**2, 0.0))   # on the sphere, +x side
+            T = down.copy(); T[:3, 3] = [xx, yy, zz]
+            contact_poses.append(T)
+    contact_poses = np.array(contact_poses)
+
+    poses = contact_raster_ee(mesh, contact_poses, n_lines=4, n_per_line=5, standoff_mm=standoff)
+    assert len(poses) == 4 * 5
+    for T in poses:
+        assert is_rigid(T, tol=1e-6)
+        # axial follows the real downward press (-z), NOT the outward radial normal
+        assert T[:3, 2] @ np.array([0, 0, -1]) > 0.99
+        p = T[:3, 3]
+        radial = p / np.linalg.norm(p)
+        assert abs(T[:3, 2] @ radial) < 0.9          # off-pole: axial != surface normal
+        assert np.linalg.norm(p) < R + standoff + 3.0  # rests near/on the surface
