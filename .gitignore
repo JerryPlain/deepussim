@@ -36,6 +36,7 @@ env/
 # Outputs
 outputs/
 runs/
+*.out                 # SLURM job logs (deepussim-scaleup-<jobid>.out)
 *.png
 !docs/**/*.png
 # Visualization figures are tracked intentionally (PNG/PDF/GIF under figures/).
