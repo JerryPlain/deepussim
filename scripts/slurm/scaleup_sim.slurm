@@ -29,13 +29,17 @@ MESH="${MESH:-data/cbct/phantom_surface.stl}"
 OUT="${OUT:-data/ds_sim}"
 TRAJ="${TRAJ:-contact}"   # 'contact': densify the real scanned patch, orientation from the real
                           # EE poses (reliable since the orientation fix). 'replay': re-drive the
-                          # exact real poses. Both are in-regime; --bags default to data/rosbags/*.
+                          # exact real poses. Both are in-regime.
 N="${N:-120}"
 FORCE_N="${FORCE_N:-5.0}"
+# Pre-extracted sequences (poses+contact) — used instead of raw bags so the container needs no
+# 'rosbags' lib. Extract once on the conda env: python scripts/extract_rosbags.py ...
+SEQS="${SEQS:-data/sequences/phantom.npz data/sequences/phantom1.npz}"
 
 # --headless: no viewer on a compute node. The write gate keeps a pose only if the probe both
 # contacted AND reached its target; dropped poses are logged with a reason.
 apptainer/run.sh python scripts/run_scaleup.py --sim \
     --volume "$VOLUME" --labels "$LABELS" --mesh "$MESH" \
     --trajectory "$TRAJ" --config configs/renderer.yaml \
+    --sequences $SEQS \
     --out "$OUT" --headless --n "$N" --force-n "$FORCE_N"

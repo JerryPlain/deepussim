@@ -125,7 +125,13 @@ def main() -> None:
                          "compliant contact (~3) gives realistic few-N forces instead of rigid 10^3 N")
     ap.add_argument("--bags", nargs="+",
                     default=["data/rosbags/phantom.bag", "data/rosbags/phantom1.bag"],
-                    help="sim: rosbag(s) whose contact-frame EE poses are replayed as probe targets")
+                    help="sim: rosbag(s) whose contact-frame EE poses are replayed as probe targets "
+                         "(needs the 'rosbags' lib; not installed in the GPU container — prefer "
+                         "--sequences there)")
+    ap.add_argument("--sequences", nargs="+",
+                    help="sim: pre-extracted sequence .npz (keys: poses, contact) — the EE poses "
+                         "and contact mask, already parsed from the bags. Use INSTEAD of --bags to "
+                         "avoid the rosbags dependency (e.g. on the Apptainer image).")
     ap.add_argument("--headless", action="store_true",
                     help="run the sim without the viewer window (default: viewer on)")
     args = ap.parse_args()
@@ -159,7 +165,6 @@ def main() -> None:
     from deepussim.calib import T_WORLD_FROM_CBCT, seat_phantom_placement
     from deepussim.calib.transforms import T_EE_FROM_PROBE
     from deepussim.calib.placement import meters_to_mm, mm_to_meters, sim_pose_to_cbct
-    from deepussim.data.rosbag import extract_sequence
     from deepussim.geometry import mat_to_quat, invert, compose
 
     if not args.mesh:
@@ -167,15 +172,30 @@ def main() -> None:
 
     mesh = trimesh.load(args.mesh)                                   # CBCT mm
 
+    # Real contact-frame EE poses (world, m). Prefer pre-extracted sequence .npz (no rosbags dep,
+    # works in the GPU container); fall back to parsing the raw bags. Both yield the same poses.
+    if args.sequences:
+        ee_poses = []
+        for s in args.sequences:
+            d = np.load(s, allow_pickle=True)
+            P, contact = d["poses"], d["contact"].astype(bool)
+            ee_poses += [P[i] for i in range(len(P)) if contact[i]]
+        ee_poses = np.asarray(ee_poses, dtype=float)
+        src = args.sequences
+    else:
+        from deepussim.data.rosbag import extract_sequence  # needs the optional 'rosbags' lib
+        ee_poses = np.asarray([f.pose for bag in args.bags
+                               for f in extract_sequence(bag).frames if f.contact], dtype=float)
+        src = args.bags
+    if len(ee_poses) == 0:
+        raise SystemExit(f"no contact frames found in {src}")
+
     # Phantom placement (matches scripts/view_sim.py): the measured T_WORLD_FROM_CBCT stands the
     # phantom on end (its CBCT-scan frame is rolled 90 deg from our DICOM-LPS volume); the real
     # rig has it LYING, so seat_phantom_placement tips it onto its side and seats the surface onto
-    # the real contact cloud (always taken from the bags). The reslice bridge is derived from the
-    # SAME transform, so mesh, CBCT volume and probe poses stay consistent.
-    frames = [f for bag in args.bags for f in extract_sequence(bag).frames if f.contact]
-    if not frames:
-        raise SystemExit(f"no contact frames found in {args.bags}")
-    all_origins = np.array([compose(f.pose, T_EE_FROM_PROBE)[:3, 3] for f in frames])
+    # the real contact cloud. The reslice bridge is derived from the SAME transform, so mesh, CBCT
+    # volume and probe poses stay consistent.
+    all_origins = np.array([compose(p, T_EE_FROM_PROBE)[:3, 3] for p in ee_poses])
     T_world_from_cbctm = seat_phantom_placement(mesh, all_origins, T_WORLD_FROM_CBCT)
     sim_to_cbct = meters_to_mm(invert(T_world_from_cbctm))           # achieved world (m) -> CBCT (mm)
 
@@ -183,8 +203,8 @@ def main() -> None:
     if args.trajectory == "replay":
         # the EE poses the arm actually reached on the phantom (reachable + on-surface),
         # subsampled to --n.
-        pick = np.linspace(0, len(frames) - 1, args.n, dtype=int)
-        sim_poses = [compose(frames[i].pose, T_EE_FROM_PROBE) for i in pick]
+        pick = np.linspace(0, len(ee_poses) - 1, args.n, dtype=int)
+        sim_poses = [compose(ee_poses[i], T_EE_FROM_PROBE) for i in pick]
         nominal_cbct = [sim_pose_to_cbct(p, sim_to_cbct) for p in sim_poses]
     elif args.trajectory == "contact":
         # generate a reachable raster over the face the arm actually scanned: map the real
@@ -192,8 +212,8 @@ def main() -> None:
         # +z-top samplers land on a different, often-unreachable face). Orientation is taken from
         # the real EE poses, not mesh normals — the real probe presses straight down and does not
         # follow the local surface normal (see sampling.contact_raster_ee).
-        rc_poses = np.array([sim_pose_to_cbct(compose(f.pose, T_EE_FROM_PROBE), sim_to_cbct)
-                             for f in frames])
+        rc_poses = np.array([sim_pose_to_cbct(compose(p, T_EE_FROM_PROBE), sim_to_cbct)
+                             for p in ee_poses])
         nominal_cbct = contact_raster_ee(mesh, rc_poses, n_lines=args.lines,
                                          n_per_line=args.per_line, standoff_mm=args.standoff_mm)
         sim_poses = [compose(T_world_from_cbctm, mm_to_meters(T)) for T in nominal_cbct]
