@@ -32,6 +32,10 @@ TRAJ="${TRAJ:-contact}"   # 'contact': densify the real scanned patch, orientati
                           # exact real poses. Both are in-regime.
 N="${N:-120}"
 FORCE_N="${FORCE_N:-5.0}"
+# Learned renderer: set RENDERER_CKPT=runs/renderer_cut/generator.pt to render realistic US
+# (CUT generator) instead of the placeholder physics model. Empty = physics placeholder.
+RENDERER_CKPT="${RENDERER_CKPT:-}"
+RENDER_ARG=""; [ -n "$RENDERER_CKPT" ] && RENDER_ARG="--renderer-ckpt $RENDERER_CKPT"
 # Pre-extracted sequences (poses+contact) — used instead of raw bags so the container needs no
 # 'rosbags' lib. Extract once on the conda env: python scripts/extract_rosbags.py ...
 SEQS="${SEQS:-data/sequences/phantom.npz data/sequences/phantom1.npz}"
@@ -41,5 +45,5 @@ SEQS="${SEQS:-data/sequences/phantom.npz data/sequences/phantom1.npz}"
 apptainer/run.sh python scripts/run_scaleup.py --sim \
     --volume "$VOLUME" --labels "$LABELS" --mesh "$MESH" \
     --trajectory "$TRAJ" --config configs/renderer.yaml \
-    --sequences $SEQS \
+    --sequences $SEQS $RENDER_ARG \
     --out "$OUT" --headless --n "$N" --force-n "$FORCE_N"

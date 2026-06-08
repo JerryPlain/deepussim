@@ -91,6 +91,8 @@ def main() -> None:
     ap.add_argument("--volume", required=True, help="CBCT intensity volume (.nrrd/.nii.gz)")
     ap.add_argument("--labels", help="CBCT label volume (.nrrd/.nii.gz) for anatomy masks")
     ap.add_argument("--config", help="renderer/geometry YAML (configs/renderer.yaml)")
+    ap.add_argument("--renderer-ckpt", help="learned-renderer generator.pt; if given, the CUT "
+                    "generator produces the US appearance instead of the physics model")
     ap.add_argument("--out", required=True, help="output dataset directory")
     ap.add_argument("--n", type=int, default=64, help="number of poses to sample")
     ap.add_argument("--trajectory",
@@ -148,12 +150,18 @@ def main() -> None:
     labels = load_volume(args.labels) if args.labels else None
     params, geom = load_config(args.config)
 
+    renderer = None
+    if args.renderer_ckpt:
+        from deepussim.renderer.neural import NeuralRenderer
+        renderer = NeuralRenderer(args.renderer_ckpt)
+        print(f"using learned renderer {args.renderer_ckpt} (epoch {renderer.epoch}) on {renderer.device}")
+
     if not args.sim:
         # No-sim: poses live directly in the CBCT frame (mm); reslice + render + free mask.
         poses = cbct_trajectory(args, volume)
         if args.save_trajectory:
             save_trajectory(args.save_trajectory, poses)
-        written = generate_dataset(args.out, volume, poses, geom, params,
+        written = generate_dataset(args.out, volume, poses, geom, params, renderer=renderer,
                                    label_volume=labels)
         print(f"wrote {written} samples to {args.out}")
         return
@@ -236,7 +244,7 @@ def main() -> None:
     scene = UltrasoundScene(cfg).build()
     scene.reset()
 
-    written = generate_dataset(args.out, volume, sim_poses, geom, params,
+    written = generate_dataset(args.out, volume, sim_poses, geom, params, renderer=renderer,
                                label_volume=labels, scene=scene, sim_to_cbct=sim_to_cbct,
                                force_target_n=args.force_n, settle_steps=300)
     print(f"wrote {written} samples to {args.out}")
