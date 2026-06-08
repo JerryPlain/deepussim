@@ -72,6 +72,7 @@ def generate_dataset(
     poses: Sequence[np.ndarray],
     geom: ProbeGeometry,
     params: RendererParams | None = None,
+    renderer=None,
     label_volume: Volume | None = None,
     scene=None,
     sim_to_cbct: np.ndarray | None = None,
@@ -165,7 +166,8 @@ def generate_dataset(
             if slice_coverage(intensity) < min_coverage:
                 dropped["empty"] += 1
                 continue
-            image = render(intensity, geom, params) # render the resliced intensity into a US image (with depth-dependent brightness, etc)
+            # appearance: the learned renderer (CUT generator) if given, else the physics model.
+            image = renderer(intensity, geom) if renderer is not None else render(intensity, geom, params)
 
             # reslice the label volume at the same pose, if given, to get a mask of the anatomy visible in the image (nearest-neighbour to preserve discrete labels)
             mask = None

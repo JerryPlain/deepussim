@@ -33,7 +33,7 @@ flowchart TB
         ASSETS["Assets (3D Slicer / VTK)<br/>intensity volume · surface mesh · label"]
         CHAIN["Geometric chain (poses → CBCT voxels)<br/>p_C = C_T_R · R_T_E(t) · E_T_U · U_T_img · p_img"]
         LC2["LC2 registration<br/>grind the cm residual → aligned {US ↔ CBCT slice} pairs"]
-        REND["Appearance renderer<br/>CBCT slice → US-like image"]
+        REND["Learned renderer (CUT)<br/>CBCT slice → US-like image"]
         TRAJ["Trajectory<br/>surface point cloud → probe poses"]
         SCALE["Scale-up (Genesis physics + reslice + render)<br/>US image · pose · contact force · anatomy mask"]
     end
@@ -178,19 +178,22 @@ standoff / axial·normal it sits at — and saves the figure.
 src/deepussim/
   geometry.py        SE(3) transforms + quaternion helpers (geometric primitives)
   data/              volume IO (NIfTI / NRRD / DICOM), dataset records, rosbag extraction
-  us/                reslice + US image-formation renderer (calibration params live here)
+  us/                reslice + physics US image-formation renderer (calibration params live here)
+  renderer/          learned renderer (B1): CUT networks + losses + NeuralRenderer (CBCT→US)
   calib/             fan-geometry fit (us_geometry), LC2 registration (lc2), lie-down placement
                      (placement.seat_phantom_placement), rigid registration, renderer fitting,
                      measured ETU/PhTR transforms
   sim/               Genesis scene: FR3 + phantom, contact force, trajectory (lazy import)
   assets/franka_fr3/ vendored Franka Research 3 MJCF + meshes (MuJoCo Menagerie)
-  pipeline/          pose sampling (surface_sweep/raster) + scale-up dataset generation
+  pipeline/          pose sampling (contact_raster_ee, EE-oriented) + scale-up dataset generation
 configs/             renderer / phantom / trajectory parameters
 scripts/             run_scaleup.py, run_lc2.py, fit_us_geometry.py, extract_rosbags.py,
-                     verify_replay.py, view_sim.py, view_trajectory.py,
-                     run_real_collection.py, make_synthetic_phantom.py, smoke_sim.py
-docs/                data_collection.md (field checklist), data_layout.md (data/ tree + how to fetch)
-tests/               geometry / quaternion / reslice / renderer / placement / rosbag / transforms unit tests
+                     verify_replay.py, view_sim.py, view_trajectory.py, smoke_sim.py,
+                     prep_renderer_data.py, train_renderer.py, eval_renderer.py (learned renderer),
+                     slurm/ (Alex GPU jobs: scaleup_sim, renderer_train, renderer_eval)
+plot_script/         figure scripts (plot_sequence/dataset/renderer_*) + the LaTeX style system
+docs/                data_collection.md (field checklist), renderer.md (B1 design), data_layout.md
+tests/               geometry / reslice / renderer / neural_renderer / scaleup_gate / sampling / ...
 ```
 
 Data files (CBCT, rosbags, derived NRRD/STL) are **not** in git — see
@@ -261,11 +264,12 @@ sbatch scripts/slurm/scaleup_sim.slurm                   # Stage 1: sim scale-up
 
 | Job | Stage | Produces | Override (env) |
 |---|---|---|---|
-| `scaleup_sim.slurm` | 1 · scale-up | (US image, pose, anatomy mask, **contact force**) per reached+contacting pose | `TRAJ`=contact\|replay, `N`, `FORCE_N`, `OUT` |
+| `scaleup_sim.slurm` | 1 · scale-up | (US image, pose, anatomy mask, **contact force**) per reached+contacting pose; `RENDERER_CKPT=…` renders realistic US | `TRAJ`, `N`, `FORCE_N`, `RENDERER_CKPT`, `OUT` |
+| `renderer_train.slurm` | 1 · B1 | learned CUT renderer → `generator.pt` (realistic US); `RESUME=…` to fine-tune | `EPOCHS`, `BATCH`, `DATA`, `RESUME`, `OUT` |
+| `renderer_eval.slurm` | 1 · B1 | structure / surface metrics (+ cached fakes for login-side FID) | `RUN`, `DATA`, `N` |
 
-> `--sim` adds **force / contact / reachability** only — the US *appearance* is the
-> placeholder renderer regardless. Making the image look real is the learned-renderer
-> job (planned: `renderer_train.slurm`), not this one.
+> `scaleup_sim.slurm` alone renders the **placeholder physics** US; pass `RENDERER_CKPT=` (a
+> trained `generator.pt`) to write the **learned** US instead — force/mask/pose are identical.
 
 The conda env / no-`--sim` path (`scripts/run_scaleup.py` without `--sim`) produces the
 same dataset minus force on CPU — fine for a quick look without the cluster.
@@ -362,8 +366,11 @@ python scripts/view_trajectory.py --mesh data/cbct/phantom_surface.stl --traject
 
 ## Status
 
-Stage 1's **geometry, calibration, trajectory, and sim loop are implemented and verified
-end-to-end**; the **appearance (learned renderer)** is the remaining build.
+Stage 1 is **end-to-end and produces aligned (US image + pose + anatomy mask + contact force)
+datasets**: geometry, calibration, EE-oriented trajectory, the sim loop, **and the learned
+appearance renderer (B1)** are implemented and verified. What remains is mostly *data*:
+collecting orientation-diverse real US to lift the renderer/trajectory out of the single
+down-press regime.
 
 **Implemented & verified.**
 - **Geometric core** — SE(3) + quaternions, convex-fan reslice, first-pass acoustic renderer,
@@ -382,21 +389,36 @@ end-to-end**; the **appearance (learned renderer)** is the remaining build.
   82% inside tissue).
 - **US intrinsics** — the convex fan (`radius 52.5`, `fov 68.1°`, `depth 101.5 mm`) is fitted
   from the real B-mode + Feng's `us_spacing` (`calib.us_geometry`).
-- **Scale-up loop** — `run_scaleup --sim` drives the arm along the real `replay` trajectory,
-  presses, bridges each achieved pose into the CBCT frame, and reslices to (US image + anatomy
-  mask + contact force). `--trajectory` also accepts generated sources mapped into the sim.
+- **Scale-up loop** — `run_scaleup --sim` drives the arm along the trajectory, presses, bridges
+  each achieved pose into the CBCT frame, and reslices to (US image + anatomy mask + contact
+  force). A write gate keeps only poses that **reached their target and made contact** (contact
+  alone is a false positive); off-anatomy / empty slices are dropped.
+- **Trajectory orientation** — generated poses take their orientation from the **real EE poses**
+  (`contact_raster_ee`), not the mesh normals. Measured against the real poses, the probe presses
+  straight **down** (axial spread <0.6°) and does *not* follow the surface normal, so mesh-normal
+  orientation was wrong and watertightness a red herring; `contact`/`replay` are the reliable
+  trajectories.
+- **Learned renderer (B1)** — a CUT generator (`renderer/`, pure-torch) maps CBCT slice → US,
+  trained against real US with an adversarial + PatchNCE (unpaired) objective, and wrapped as
+  `NeuralRenderer` so `generate_dataset(renderer=…)` writes realistic US (the physics model stays
+  as a baseline). Evaluated (`eval_renderer.py`): the surface is preserved to **~0.9 mm** (no
+  hallucination of the main structure); FID is a relative yardstick (Inception-on-US).
+  Pipeline: `scripts/{prep_renderer_data,train_renderer,eval_renderer}.py` +
+  `scripts/slurm/renderer_{train,eval}.slurm`; fine-tune new data with `--resume`.
 - **LC2 registration** — image-based `lc2_similarity` + constrained 6-DoF `register_frame_lc2`,
-  initialised from the seated placement. 47 tests pass. (Absolute LC2 stays low on this
-  low-texture phantom — it is *not* a reliable arbiter; see the placement note above.)
+  initialised from the seated placement. (Absolute LC2 stays low on this low-texture phantom — it
+  is *not* a reliable arbiter; see the placement note above.)
 
 **Pending (Stage 1).**
-- **Learned renderer (the appearance branch)** — only renderer-*parameter* fitting exists; train
-  an image-translation renderer (pix2pix paired on the LC2 `{US ↔ slice}` pairs / CycleGAN
-  unpaired at scale). This is the main remaining piece.
-- **Generated trajectory on this phantom** — the surface mesh is not watertight, so the
-  mesh-normal samplers (`surface_sweep`/`surface_raster`/`contact_raster`) mis-orient the probe;
-  `replay` is the only reliable trajectory for now. Fix: a watertight mesh, or orient generated
-  poses from the real EE poses (see the Trajectory-generation note above).
+- **Multi-angle data (the main remaining piece)** — the renderer and trajectory are validated only
+  for the single down-press regime (the two sequences span <0.6° of orientation). Tilt-diverse real
+  US (next collection: ±25° fan/rock + fiducials) → fine-tune (`--resume`) unlocks multi-angle
+  scale-up. The pipeline is ready to consume it; see [`docs/data_collection.md`](docs/data_collection.md).
+- **Strict renderer validation** — FID + structure/surface metrics exist, but a real
+  structure-consistency stress test needs the geometric variety (and fiducials) the next collection
+  provides; FID is only a relative yardstick on this Inception-on-US setup.
+- **`surface_*` samplers** — `surface_sweep`/`surface_raster` still orient from mesh normals (a
+  latent issue if used); `contact`/`replay` are the live, reliable paths.
 - **LC2 accuracy / placement** — LC2 removes the gross error but **saturates before mm precision
   on this low-texture phantom**, and the refinement is bound-limited (the placement still carries
   a ~cm offset, seated on the contact cloud rather than from fiducials). Tighten the seat (along

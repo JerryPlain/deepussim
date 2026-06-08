@@ -36,7 +36,8 @@ env/
 # Outputs
 outputs/
 runs/
-*.out                 # SLURM job logs (deepussim-scaleup-<jobid>.out)
+# SLURM job logs (deepussim-<job>-<jobid>.out) — gitignore has no inline comments
+*.out
 *.png
 !docs/**/*.png
 # Visualization figures are tracked intentionally (PNG/PDF/GIF under figures/).
