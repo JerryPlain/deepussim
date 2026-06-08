@@ -28,10 +28,14 @@ DATA="${DATA:-data/renderer}"
 OUT="${OUT:-runs/renderer_cut}"
 EPOCHS="${EPOCHS:-300}"
 BATCH="${BATCH:-4}"
+# Fine-tune: set RESUME=runs/renderer_cut/generator.pt to continue from a checkpoint (new data).
+# Point DATA at pools built from OLD + NEW sequences so the old regime isn't forgotten.
+RESUME="${RESUME:-}"
+RESUME_ARG=""; [ -n "$RESUME" ] && RESUME_ARG="--resume $RESUME"
 
 if [ ! -f "$DATA/source_cbct.npz" ] || [ ! -f "$DATA/target_us.npz" ]; then
     echo "missing pools in $DATA — run scripts/prep_renderer_data.py first (see header)"; exit 1
 fi
 
 apptainer/run.sh python scripts/train_renderer.py \
-    --data "$DATA" --out "$OUT" --epochs "$EPOCHS" --batch "$BATCH" --device cuda
+    --data "$DATA" --out "$OUT" --epochs "$EPOCHS" --batch "$BATCH" --device cuda $RESUME_ARG

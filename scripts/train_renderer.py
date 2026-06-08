@@ -39,6 +39,9 @@ def main() -> None:
     ap.add_argument("--num-patches", type=int, default=256)
     ap.add_argument("--lambda-nce", type=float, default=1.0)
     ap.add_argument("--sample-every", type=int, default=10, help="dump samples every N epochs")
+    ap.add_argument("--resume", help="checkpoint to fine-tune from (e.g. a previous generator.pt). "
+                    "Loads G (and D/F if present) and continues training on THIS --data — point "
+                    "--data at pools built from OLD + NEW sequences to avoid forgetting.")
     ap.add_argument("--workers", type=int, default=4)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
@@ -62,6 +65,16 @@ def main() -> None:
     opt_g = torch.optim.Adam(list(model.G.parameters()) + list(model.F.parameters()),
                              lr=args.lr, betas=(0.5, 0.999))
     opt_d = torch.optim.Adam(model.D.parameters(), lr=args.lr, betas=(0.5, 0.999))
+
+    if args.resume:                                          # fine-tune: load weights, fresh optimiser
+        ck = torch.load(args.resume, map_location=args.device)
+        model.G.load_state_dict(ck["G"])
+        loaded = ["G"]
+        for k, net in (("D", model.D), ("F", model.F)):
+            if k in ck:
+                net.load_state_dict(ck[k]); loaded.append(k)
+        print(f"resumed {','.join(loaded)} from {args.resume} (epoch {ck.get('epoch')}) "
+              f"— fine-tuning on {len(ds)} imgs", flush=True)
 
     for epoch in range(1, args.epochs + 1):
         t0 = time.time(); agg = {}
@@ -93,7 +106,9 @@ def main() -> None:
                 s = b0["src"].to(args.device); f = model.G(s)
             np.savez_compressed(out / f"samples_ep{epoch:04d}.npz",
                                 src=b0["src"].numpy(), fake=f.cpu().numpy(), tgt=b0["tgt"].numpy())
-            torch.save({"G": model.G.state_dict(), "epoch": epoch, "args": vars(args)},
+            # save G/D/F (D,F let a later --resume continue cleanly; NeuralRenderer/eval read just G+args)
+            torch.save({"G": model.G.state_dict(), "D": model.D.state_dict(),
+                        "F": model.F.state_dict(), "epoch": epoch, "args": vars(args)},
                        out / "generator.pt")
             model.train()
     print(f"done -> {out}/generator.pt", flush=True)

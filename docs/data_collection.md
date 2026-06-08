@@ -108,3 +108,60 @@ sure the **must-capture** fields above are present, because those can't be recon
 | Synced US + pose + force | Step 2 real dataset; Step 4 calibration target |
 | US imaging params | `RendererParams` / `ProbeGeometry`; renderer calibration |
 | Phantom datasheet/materials | label volume + renderer acoustic priors |
+
+---
+
+## ⭐ Next session — MULTI-ANGLE collection (the #1 gap)
+
+The two existing sequences press the probe **straight down** the whole time — measured axial
+spread **< 0.6°** (single orientation). The learned renderer and the trajectory generator are
+therefore only valid for that one pose; **anything tilted is out-of-distribution**. The single
+most valuable thing to collect next is **orientation diversity**.
+
+**Definition.** Multi-angle = vary the probe **orientation** (its axial / imaging direction), not
+just position. At (roughly) the same spots, *tilt and spin* the probe so the axial sweeps a cone.
+
+**What to vary (probe has 3 rotational DOF):**
+
+| Angle | What it does | Priority | Range |
+|---|---|---|---|
+| **Tilt / fan (rock)** | tip the probe so the beam leaves perpendicular | ⭐ most important | **±25°** from down |
+| both tilt axes | rock along the scan-line dir *and* the elevation dir | medium | ±25° each |
+| **Spin** (about the beam axis) | rotates the imaging plane (long ↔ short axis) | medium | **0° / 45° / 90°** |
+
+> Physical limit: on the belly-up top surface a ±20–30° tilt still keeps contact/coupling; beyond
+> that the probe grazes and the image degrades. Stay within what holds good contact.
+
+**How much — fill the angle histogram, don't chase a frame count.** Aim for the axial angle to
+**span ±25° fairly densely** (each ~5° bin populated), not spike at 0°. Best way: at each anchor,
+**rock the probe smoothly from −25° to +25° over ~5–10 s** and let the frame rate sample the
+continuum (much better than a few discrete angles). Rough target: **6–10 anchor points**, each
+with a lateral fan + an elevation fan + 3 spins → **~1–2 k contact frames spanning ±25°**.
+
+**Also this session:** attach **fiducials** (≥4, non-coplanar, asymmetric, non-metal) — they give
+LC2 the texture it lacks (→ mm registration) *and* a hard structure-consistency check for the
+renderer. Keep recording **pose + US + force** throughout (so every tilted frame carries its pose;
+the EE-orientation field then feeds `contact_raster_ee`).
+
+**On-site QC (don't leave without checking):** after each sweep,
+`python plot_script/plot_sequence.py data/sequences/<new>.npz` and look at `figures/<new>/orientation.png`
+— the axial-angle histogram must be **broad (±25°)**, not the old 0.6° spike. If it's narrow, re-sweep.
+
+## Fine-tune workflow (how the new data plugs in)
+
+The method does **not** change — CUT is unpaired, so new real US just joins the target pool and the
+generator is **fine-tuned** (not retrained). To avoid forgetting the old regime, build the pools
+from **old + new** sequences together:
+
+```bash
+# 1) rebuild pools from OLD + NEW sequences (combined → no forgetting)
+python scripts/prep_renderer_data.py \
+    --sequences data/sequences/phantom.npz data/sequences/phantom1.npz data/sequences/<new>.npz \
+    --volume data/cbct/intensity.nrrd --mesh data/cbct/phantom_surface.stl \
+    --config configs/renderer.yaml --out data/renderer_v2
+# 2) fine-tune from the existing checkpoint (fewer epochs, on the GPU)
+EPOCHS=100 DATA=data/renderer_v2 OUT=runs/renderer_v2 RESUME=runs/renderer_cut/generator.pt \
+  sbatch scripts/slurm/renderer_train.slurm
+# 3) re-evaluate — surface/structure now has tilt variation to actually stress-test it
+RUN=runs/renderer_v2 DATA=data/renderer_v2 sbatch scripts/slurm/renderer_eval.slurm
+```
