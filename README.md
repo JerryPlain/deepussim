@@ -19,8 +19,10 @@ supplies the scale — which is then used to ask which representation transfers 
 
 ## Pipeline
 
-Real US enters Stage 1 at exactly two points — **geometric registration** and **render
-supervision** — and never elsewhere; everything downstream is synthesized.
+Real US enters Stage 1 at three points — **geometric registration**, **render supervision**,
+and **trajectory orientation** (generated poses borrow their orientation from the real EE poses,
+since the probe presses straight down rather than along the surface normal) — and never elsewhere;
+everything downstream is synthesized.
 
 ```mermaid
 flowchart TB
@@ -34,7 +36,7 @@ flowchart TB
         CHAIN["Geometric chain (poses → CBCT voxels)<br/>p_C = C_T_R · R_T_E(t) · E_T_U · U_T_img · p_img"]
         LC2["LC2 registration<br/>grind the cm residual → aligned {US ↔ CBCT slice} pairs"]
         REND["Learned renderer (CUT)<br/>CBCT slice → US-like image"]
-        TRAJ["Trajectory<br/>surface point cloud → probe poses"]
+        TRAJ["Trajectory<br/>real EE poses → probe poses<br/>(replay; contact_raster_ee: position from contact cloud, orientation from real EE)"]
         SCALE["Scale-up (Genesis physics + reslice + render)<br/>US image · pose · contact force · anatomy mask"]
     end
 
@@ -48,6 +50,7 @@ flowchart TB
     CBCT -->|3D Slicer| ASSETS
     USREAL -. registration .-> LC2
     USREAL -. render supervision .-> REND
+    USREAL -. orientation .-> TRAJ
     PROBE --> SCALE
     ASSETS --> CHAIN --> LC2 --> REND --> SCALE
     ASSETS --> TRAJ --> SCALE
@@ -86,23 +89,19 @@ gross error and aligns the surface, but saturates before mm precision (see Statu
 
 ### Trajectory generation
 
-The probe can only glide *along* the phantom surface (it cannot pierce it), so scan
-trajectories are constrained to that surface. Each pose is built from the CBCT surface mesh:
+The probe glides *along* the phantom surface, so a pose needs a surface **position** and an
+**orientation**. The key finding: measured against the real poses, the probe presses **straight
+down** (its axial varies <0.6° over a whole sweep) and does **not** follow the local surface
+normal — so orientation is taken from the **real EE poses**, not from mesh normals. Two reliable
+trajectories ([`pipeline/sampling.py`](src/deepussim/pipeline/sampling.py), the `--trajectory` flag
+of [`run_scaleup.py`](scripts/run_scaleup.py)):
 
-1. **Sample** points across the surface — the candidate spots where the probe sits.
-   `pipeline.sampling.surface_raster` lays parallel guide lines over the phantom top and
-   projects each to the nearest mesh vertex (`surface_sweep` is the single-line case).
-2. **Estimate a smoothed surface normal** at each point (`_smoothed_normal`: PCA over a
-   neighbourhood, to avoid the staircase noise of the threshold-extracted mesh).
-3. **Build a probe pose** (`_pose_on_surface`): position on the surface (with a small outward
-   standoff so the probe rests on it rather than inside), axial axis along the inward normal
-   (perpendicular contact, as in SonoGym); the in-plane rotation is a free, consistent convention.
-4. **Order** the points into a smooth (serpentine) scan path.
-
-The code is [`pipeline/sampling.py`](src/deepussim/pipeline/sampling.py); it is exercised on a
-sphere in [`tests/test_sampling.py`](tests/test_sampling.py) (poses rest on the surface +
-standoff, axial · inward-normal ≈ 1, raster covers a 2-D patch). On the real phantom a 120-pose
-raster sits at the 2 mm standoff with axial · inward-normal ≈ 0.99.
+- **`replay`** — drive the arm along the real rosbag EE poses (subsampled). Reachable and
+  on-surface by construction; the faithful reference, but it produces no new viewpoints.
+- **`contact_raster_ee`** (`--trajectory contact`) — densify within the real scanned region:
+  **position** from a serpentine raster over the real contact-point cloud's fitted plane,
+  **orientation** borrowed from the nearest real EE pose. The surface mesh is used only to project
+  each guide onto the surface and set the standoff — never for orientation.
 
 The resulting pose stream (`T_cbct_from_probe`, mm) is used **twice from one source** — fed
 directly to reslice the volume, *and* mapped through the seated placement
@@ -111,19 +110,14 @@ the arm and press the Genesis probe into contact. Because the arm path and the r
 come from the *same* poses, "where the probe is" and "which slice we image" are aligned by
 construction — the same property that makes the anatomy masks free.
 
-**Trajectory sources** feed the same machinery (the `--trajectory` flag of
-[`run_scaleup.py`](scripts/run_scaleup.py)): **replay** (sim only) drives the real rosbag EE poses
-— reachable and on-surface by construction, the faithful reference; **generated** (`surface` /
-`raster` / `contact`) samples novel poses for scale-up, mapped into the sim to drive the arm
-(out-of-reach poses are dropped).
-
-> ⚠️ **Known limitation (this phantom).** The supplied surface mesh is **not watertight**, so its
-> normals are unreliable — the mesh-normal-based generators (`surface_sweep`, `surface_raster`,
-> `contact_raster`) can mis-orient the probe (real-axial · mesh-normal ≈ −0.26 where it should be
-> +1). For now the **reliable** trajectory is `replay`; a robust generated trajectory needs either
-> a watertight mesh (fill holes / remesh) or to orient poses from the real EE poses rather than the
-> mesh. [`scripts/view_trajectory.py`](scripts/view_trajectory.py) renders a saved/generated
-> trajectory (`--trajectory-file` or `--trajectory contact`) for inspection.
+> ⚠️ **In-regime only.** `replay` and `contact_raster_ee` cover the **real scanned region at the
+> single down-press orientation** — the EE-orientation fix makes them reliable but does not invent
+> new viewpoints. The mesh-normal samplers `surface_sweep` / `surface_raster` are **deprecated**:
+> they orient from mesh normals, which the real probe does not follow (the earlier "non-watertight
+> mesh" diagnosis was a **red herring** — measured real-axial vs mesh-normal disagree regardless of
+> watertightness). Multi-angle coverage needs orientation-diverse real US (next collection); then
+> `contact_raster_ee` inherits the tilts automatically. See
+> [`docs/data_collection.md`](docs/data_collection.md).
 
 A generated trajectory is **deterministic** from (mesh + params), so it need not be stored — the
 achieved poses are written into the dataset anyway; `--save-trajectory <path.npz>` optionally
