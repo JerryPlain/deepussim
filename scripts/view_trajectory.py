@@ -73,27 +73,47 @@ def _decimate(mesh, target_faces=3500):
     return None
 
 
-def _contact_poses_cbct(mesh, bags):
-    """The real in-contact probe poses (4x4), mapped into the CBCT mm frame (via the placement)."""
-    from deepussim.data.rosbag import extract_sequence
+def _contact_poses_cbct(mesh, bags=None, sequences=None):
+    """The real in-contact probe poses (4x4), mapped into the CBCT mm frame (via the placement).
+
+    Prefers pre-extracted ``sequences`` (.npz with ``poses``/``contact``, no rosbags dep — works in
+    the GPU container); falls back to parsing raw ``bags``. Both yield the same contact poses.
+    """
     from deepussim.calib import T_WORLD_FROM_CBCT, T_EE_FROM_PROBE, seat_phantom_placement
     from deepussim.calib.placement import meters_to_mm, sim_pose_to_cbct
     from deepussim.geometry import invert, compose
 
-    frames = [f for bag in bags for f in extract_sequence(bag).frames if f.contact]
-    if not frames:
-        raise SystemExit(f"no contact frames in {bags}")
-    face = np.array([compose(f.pose, T_EE_FROM_PROBE)[:3, 3] for f in frames])
+    if sequences:
+        ee = []
+        for s in sequences:
+            d = np.load(s, allow_pickle=True)
+            P, contact = d["poses"], d["contact"].astype(bool)
+            ee += [P[i] for i in range(len(P)) if contact[i]]
+        ee_poses = np.asarray(ee, dtype=float)
+    else:
+        from deepussim.data.rosbag import extract_sequence
+        ee_poses = np.asarray([f.pose for bag in bags
+                               for f in extract_sequence(bag).frames if f.contact], dtype=float)
+    if len(ee_poses) == 0:
+        raise SystemExit(f"no contact frames in {sequences or bags}")
+    face = np.array([compose(p, T_EE_FROM_PROBE)[:3, 3] for p in ee_poses])
     s2c = meters_to_mm(invert(seat_phantom_placement(mesh, face, T_WORLD_FROM_CBCT)))
-    return np.array([sim_pose_to_cbct(compose(f.pose, T_EE_FROM_PROBE), s2c) for f in frames])
+    return np.array([sim_pose_to_cbct(compose(p, T_EE_FROM_PROBE), s2c) for p in ee_poses])
 
 
 def build_trajectory(args, mesh):
     from deepussim.pipeline.sampling import (surface_raster, surface_sweep, contact_raster_ee,
+                                             surface_curves_from_points, side_anchor_curves,
                                              top_sweep_endpoints)
 
+    if args.trajectory == "surface-curves":
+        rc_poses = _contact_poses_cbct(mesh, bags=args.bags, sequences=args.sequences)
+        curves = side_anchor_curves(mesh, rc_poses, n_curves=args.lines, n_anchors=args.curve_anchors,
+                                    reach=args.curve_reach, along_frac=args.span_frac)
+        return surface_curves_from_points(mesh, curves, contact_poses=rc_poses,
+                                          points_per_curve=args.per_line, standoff_mm=args.standoff_mm)
     if args.trajectory == "contact":
-        rc_poses = _contact_poses_cbct(mesh, args.bags)
+        rc_poses = _contact_poses_cbct(mesh, bags=args.bags, sequences=args.sequences)
         return contact_raster_ee(mesh, rc_poses, n_lines=args.lines, n_per_line=args.per_line,
                                  standoff_mm=args.standoff_mm)
     if args.trajectory == "raster":
@@ -126,11 +146,13 @@ def _equal_3d(ax, P):
         pass
 
 
-def render(P, A, deci, out: Path, title: str | None):
+def render(P, A, deci, out: Path, title: str | None, cval=None, clabel: str = "scan order",
+           cmap: str | None = None):
     import matplotlib.pyplot as plt
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-    order = np.arange(len(P))
+    order = np.arange(len(P)) if cval is None else np.asarray(cval)
+    cmap = cmap or CMAP
     fig = plt.figure(figsize=(7.2, 3.0))
     # explicit rectangles so the 3D and the equal-aspect 2D panel stay aligned
     ax = fig.add_axes([0.00, 0.02, 0.52, 0.90], projection="3d")
@@ -141,7 +163,7 @@ def render(P, A, deci, out: Path, title: str | None):
     ax.plot(P[:, 0], P[:, 1], P[:, 2], "-", c=PATH_C, lw=0.7, alpha=0.7, zorder=2)
     ax.quiver(P[:, 0], P[:, 1], P[:, 2], A[:, 0], A[:, 1], A[:, 2], length=12.0,
               color=ACCENT, linewidth=0.6, arrow_length_ratio=0.35, zorder=3)
-    sc = ax.scatter(P[:, 0], P[:, 1], P[:, 2], c=order, cmap=CMAP, s=12,
+    sc = ax.scatter(P[:, 0], P[:, 1], P[:, 2], c=order, cmap=cmap, s=12,
                     depthshade=False, zorder=4)
     _equal_3d(ax, P)
     ax.set_xlabel("$x$ (mm)", labelpad=-2); ax.set_ylabel("$y$ (mm)", labelpad=-2)
@@ -160,7 +182,7 @@ def render(P, A, deci, out: Path, title: str | None):
         V = np.asarray(deci.vertices)
         ax2.scatter(V[:, 0], V[:, 1], s=1.5, c="0.85", alpha=0.5, edgecolors="none", zorder=0)
     ax2.plot(P[:, 0], P[:, 1], "-", c=PATH_C, lw=0.7, alpha=0.7, zorder=2)
-    ax2.scatter(P[:, 0], P[:, 1], c=order, cmap=CMAP, s=13, zorder=4)
+    ax2.scatter(P[:, 0], P[:, 1], c=order, cmap=cmap, s=13, zorder=4)
     ax2.set_aspect("equal", adjustable="datalim")     # fill the rect, pad data limits (no float)
     ax2.set_xlabel("$x$ (mm)"); ax2.set_ylabel("$y$ (mm)")
     ax2.set_title("(b) top view")
@@ -169,7 +191,7 @@ def render(P, A, deci, out: Path, title: str | None):
 
     cax = fig.add_axes([0.925, 0.20, 0.016, 0.62])
     cb = fig.colorbar(sc, cax=cax)
-    cb.set_label("scan order", fontsize=9); cb.outline.set_linewidth(0.5)
+    cb.set_label(clabel, fontsize=9); cb.outline.set_linewidth(0.5)
     cb.ax.tick_params(labelsize=8)
     if title:
         fig.suptitle(title, y=1.01, fontsize=11)
@@ -185,12 +207,26 @@ def main() -> None:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mesh", help="phantom surface STL (CBCT mm): generate from it and/or draw it")
     ap.add_argument("--trajectory-file", help="load a saved trajectory (.npz with poses_cbct_mm)")
-    ap.add_argument("--trajectory", choices=["contact", "surface", "raster"], default="contact",
+    ap.add_argument("--trajectory", choices=["contact", "surface-curves", "surface", "raster"],
+                    default="contact",
                     help="generate: 'contact' (default) rasters the face the arm actually scanned "
-                         "(needs --bags); 'surface'/'raster' the mesh's geometric +z top")
+                         "(needs --bags); 'surface-curves' drapes curves out onto the lateral sides "
+                         "(needs --bags, down-press orientation, Tier A/B); 'surface'/'raster' the "
+                         "mesh's geometric +z top")
+    ap.add_argument("--curve-reach", type=float, default=2.0,
+                    help="surface-curves: how far the outer curves fan past the scanned patch "
+                         "(x the patch half-width; >1 leaves the patch onto the sides)")
+    ap.add_argument("--curve-anchors", type=int, default=6,
+                    help="surface-curves: anchor points per curve (the spline is fit through these)")
+    ap.add_argument("--tier-b-deg", type=float, default=35.0,
+                    help="surface-turn from the scanned patch (deg) above which a pose is the lateral "
+                         "'Tier B' frontier (renderer-untrusted); used for the colour split + count")
     ap.add_argument("--bags", nargs="+",
                     default=["data/rosbags/phantom.bag", "data/rosbags/phantom1.bag"],
-                    help="contact: rosbag(s) whose contact frames define the reachable scan patch")
+                    help="contact/surface-curves: rosbag(s) whose contact frames define the scan patch")
+    ap.add_argument("--sequences", nargs="+",
+                    help="contact/surface-curves: pre-extracted sequence .npz (keys: poses, contact) "
+                         "INSTEAD of --bags (no rosbags dep; works in the GPU container)")
     ap.add_argument("--sweep-axis", type=int, default=0, help="sweep axis (0=x, 1=y)")
     ap.add_argument("--span-frac", type=float, default=0.6)
     ap.add_argument("--cross-frac", type=float, default=0.4)
@@ -201,6 +237,9 @@ def main() -> None:
     ap.add_argument("--save-trajectory", help="also save the generated poses to this .npz")
     ap.add_argument("--out", default="data/trajectories/trajectory.pdf",
                     help="output figure path (a .pdf and a .png are written)")
+    ap.add_argument("--color", choices=["order", "deviation"], default="order",
+                    help="scatter colour: 'order' (scan order) or 'deviation' (axial-vs-surface-"
+                         "normal angle, Tier A/B; the default for --trajectory surface-curves)")
     ap.add_argument("--title", help="optional figure suptitle")
     ap.add_argument("--usetex", action="store_true", help="render with a real LaTeX install")
     args = ap.parse_args()
@@ -229,15 +268,28 @@ def main() -> None:
 
     P, A = poses[:, :3, 3], poses[:, :3, 2]
     print(f"{src}: {len(poses)} poses, extent (mm) {np.ptp(P, 0).round(1)}")
-    if mesh is not None:
+    cval = clabel = cmap = None
+    if mesh is not None and args.trajectory == "surface-curves" and not args.trajectory_file:
+        # winding-independent Tier metric: normal oriented by the real approach, not mesh normals
+        from deepussim.pipeline.sampling import pose_surface_deviation
+        rc = _contact_poses_cbct(mesh, bags=args.bags, sequences=args.sequences)
+        standoff, dev = pose_surface_deviation(mesh, poses, rc)
+        n_b = int(((dev > args.tier_b_deg) & (dev <= 90)).sum()); n_x = int((dev > 90).sum())
+        print(f"  standoff (mm): mean {standoff.mean():.2f}   Tier @ {args.tier_b_deg:g} deg: "
+              f"A {len(dev) - n_b - n_x}  B(lateral) {n_b}  broken(>90) {n_x}")
+        cval, clabel, cmap = dev, "axial-normal dev (deg)", "RdYlBu_r"
+    elif mesh is not None:
         standoff, cos = surface_stats(mesh, P, A)
         print(f"  standoff (mm): mean {standoff.mean():.2f}   "
               f"axial.inward-normal: mean {cos.mean():.3f}  min {cos.min():.3f}  (1 = perpendicular)")
+        if args.color == "deviation":
+            cval = np.degrees(np.arccos(np.clip(cos, -1.0, 1.0)))
+            clabel, cmap = "axial-normal dev (deg)", "RdYlBu_r"
 
     deci = _decimate(mesh) if mesh is not None else None
     if mesh is not None and deci is None:
         print("  (mesh decimation unavailable; drawing trajectory only)")
-    render(P, A, deci, Path(args.out), args.title)
+    render(P, A, deci, Path(args.out), args.title, cval=cval, clabel=clabel, cmap=cmap)
 
 
 if __name__ == "__main__":

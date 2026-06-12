@@ -102,6 +102,17 @@ of [`run_scaleup.py`](scripts/run_scaleup.py)):
   **position** from a serpentine raster over the real contact-point cloud's fitted plane,
   **orientation** borrowed from the nearest real EE pose. The surface mesh is used only to project
   each guide onto the surface and set the standoff — never for orientation.
+- **`surface_curves_from_points`** (`--trajectory surface-curves`) — *leave* the scanned footprint:
+  drape smooth curves through surface points anywhere on the phantom — including the lateral sides a
+  real probe can't reach (sim's exclusive advantage) — still borrowing the real **down-press**
+  orientation. This pushes the cheap **position** axis while staying in-regime on the expensive
+  **orientation** axis (`contact_raster_ee` is bounded by `half_u/half_v` = the real footprint, so
+  it scales up volume but not *coverage*). `side_anchor_curves` auto-seeds the curves; or pass your
+  own hand-picked anchors. Each pose is tagged by `pose_surface_deviation` (**surface-turn** vs the
+  patch, *not* axial-vs-normal — the real press is itself ~50° off the surface normal, so it scores
+  the trusted real poses as Tier A by construction): **Tier A** (≤ `--tier-b-deg`, surface oriented
+  like the patch → renderer-trusted) vs **Tier B** (lateral frontier → tag/quarantine, or drop with
+  `--max-dev-deg`). Tier B is *also* the map of where the next real collection should go.
 
 The resulting pose stream (`T_cbct_from_probe`, mm) is used **twice from one source** — fed
 directly to reslice the volume, *and* mapped through the seated placement
@@ -110,21 +121,28 @@ the arm and press the Genesis probe into contact. Because the arm path and the r
 come from the *same* poses, "where the probe is" and "which slice we image" are aligned by
 construction — the same property that makes the anatomy masks free.
 
-> ⚠️ **In-regime only.** `replay` and `contact_raster_ee` cover the **real scanned region at the
-> single down-press orientation** — the EE-orientation fix makes them reliable but does not invent
-> new viewpoints. The mesh-normal samplers `surface_sweep` / `surface_raster` are **deprecated**:
-> they orient from mesh normals, which the real probe does not follow (the earlier "non-watertight
-> mesh" diagnosis was a **red herring** — measured real-axial vs mesh-normal disagree regardless of
-> watertightness). Multi-angle coverage needs orientation-diverse real US (next collection); then
-> `contact_raster_ee` inherits the tilts automatically. See
+> ⚠️ **Two axes of "regime", not one.** *Orientation* (down-press ↔ tilted) was only supervised at
+> the single down-press, so tilting is real extrapolation — **only new collection** extends it.
+> *Position* (the scanned patch ↔ elsewhere on the surface) is the cheap axis: at the trusted
+> orientation, new surface locations are a milder extrapolation, and the hard-to-reach ones are
+> sim's **exclusive** advantage (real collection can't reach them either). `replay` /
+> `contact_raster_ee` move on *neither* axis (they densify the footprint); `surface-curves` pushes
+> *position* while holding *orientation* — its **Tier B** poses are where position has drifted far
+> enough that the contact geometry no longer resembles training (validate before trusting). The
+> mesh-normal samplers `surface_sweep` / `surface_raster` stay **deprecated** (they orient from mesh
+> normals, which the real probe does not follow — the "non-watertight mesh" diagnosis was a **red
+> herring**; the same unreliable normal sign is why Tier tagging measures surface-*turn*, not
+> axial-vs-normal). Multi-angle coverage still needs orientation-diverse real US; then
+> `contact_raster_ee` and `surface-curves` inherit the tilts automatically. See
 > [`docs/data_collection.md`](docs/data_collection.md).
 
 A generated trajectory is **deterministic** from (mesh + params), so it need not be stored — the
 achieved poses are written into the dataset anyway; `--save-trajectory <path.npz>` optionally
 dumps it (`T_cbct_from_probe`, mm) for inspection or to reuse the identical poses across runs.
 [`scripts/view_trajectory.py`](scripts/view_trajectory.py) renders one (generate from the mesh,
-or load a saved `.npz`) — poses coloured by scan order with inward axial arrows, plus the
-standoff / axial·normal it sits at — and saves the figure.
+or load a saved `.npz`) — poses coloured by scan order (or by Tier-A/B surface-turn with
+`--color deviation`, the default for `surface-curves`) with inward axial arrows, plus the standoff
+it sits at — and saves the figure.
 
 ### Design invariants
 
