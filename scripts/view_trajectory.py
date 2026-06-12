@@ -161,65 +161,86 @@ def _curve_lines(ax, P, seg_len, dims):
 
 
 def render(P, A, deci, out: Path, title: str | None, cval=None, clabel: str = "scan order",
-           cmap: str | None = None, contact=None, seg_len: int | None = None):
+           cmap: str | None = None, contact=None, seg_len: int | None = None,
+           tier_b: float | None = None):
     import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
     order = np.arange(len(P)) if cval is None else np.asarray(cval)
     cmap = cmap or CMAP
-    fig = plt.figure(figsize=(7.6, 3.2))
-    # explicit rectangles so the 3D and the equal-aspect 2D panel stay aligned
-    ax = fig.add_axes([0.00, 0.02, 0.52, 0.90], projection="3d")
+    GREEN = "#1a9850"
+    fig = plt.figure(figsize=(8.4, 4.2))
+    # fixed y-bands keep every text element in its own lane (no overlap): title / captions / panels.
+    if title:
+        fig.text(0.5, 0.965, title, ha="center", va="center", fontsize=11.5)
+    fig.text(0.255, 0.895, "(a) 3D perspective", ha="center", fontsize=9.5, style="italic")
+    fig.text(0.70, 0.895, "(b) top view ($x$–$y$)", ha="center", fontsize=9.5, style="italic")
+
+    # ---- (a) 3D ----------------------------------------------------------------------------
+    ax = fig.add_axes([0.01, 0.10, 0.49, 0.74], projection="3d")
     if deci is not None:
         tris = Poly3DCollection(np.asarray(deci.vertices)[np.asarray(deci.faces)],
-                                alpha=0.14, facecolor="#9fb3c8", edgecolor="none")
+                                alpha=0.11, facecolor="#9fb3c8", edgecolor="none")
         ax.add_collection3d(tris)
     if contact is not None:                              # the real scanned footprint we leave
-        ax.scatter(contact[:, 0], contact[:, 1], contact[:, 2], s=5, c="#1a9850", alpha=0.35,
-                   edgecolors="none", depthshade=False, zorder=2, label="real scanned patch")
+        ax.scatter(contact[:, 0], contact[:, 1], contact[:, 2], s=5, c=GREEN, alpha=0.30,
+                   edgecolors="none", depthshade=False, zorder=2)
     _curve_lines(ax, P, seg_len, (0, 1, 2))
-    ax.quiver(P[:, 0], P[:, 1], P[:, 2], A[:, 0], A[:, 1], A[:, 2], length=11.0,
-              color=ACCENT, linewidth=0.5, arrow_length_ratio=0.35, alpha=0.7, zorder=3)
-    sc = ax.scatter(P[:, 0], P[:, 1], P[:, 2], c=order, cmap=cmap, s=14,
+    step = max(1, len(P) // 10)                          # sparse down-press arrows (de-clutter)
+    ax.quiver(P[::step, 0], P[::step, 1], P[::step, 2], A[::step, 0], A[::step, 1], A[::step, 2],
+              length=10.0, color="0.45", linewidth=0.5, arrow_length_ratio=0.4, alpha=0.6, zorder=3)
+    sc = ax.scatter(P[:, 0], P[:, 1], P[:, 2], c=order, cmap=cmap, s=15,
                     depthshade=False, zorder=4)
     _equal_3d(ax, P)
-    ax.set_xlabel("$x$ (mm)", labelpad=-2); ax.set_ylabel("$y$ (mm)", labelpad=-2)
-    ax.set_zlabel("$z$ (mm)", labelpad=-4)
-    ax.tick_params(pad=-1)
+    ax.set_xlabel("$x$ (mm)", labelpad=1); ax.set_ylabel("$y$ (mm)", labelpad=1)
+    ax.set_zlabel("$z$ (mm)", labelpad=1)
+    ax.tick_params(labelsize=7, pad=0)
     ax.view_init(elev=24, azim=-62)
     for pane in (ax.xaxis, ax.yaxis, ax.zaxis):
         pane.pane.set_facecolor("white"); pane.pane.set_edgecolor("0.85")
-        pane._axinfo["grid"].update(color="0.92", linewidth=0.4)
-    if contact is not None:
-        ax.legend(loc="upper left", fontsize=7, frameon=False, handletextpad=0.2, borderpad=0.1)
-    ax.set_title("(a) perspective")
+        pane._axinfo["grid"].update(color="0.93", linewidth=0.4)
 
-    # (b) top view 2D — the curve pattern reads crisply in print (axial is into the page here,
-    # so the arrows live in panel (a); panel (b) shows the curves + colour cleanly)
-    ax2 = fig.add_axes([0.605, 0.16, 0.30, 0.74])
+    # ---- (b) top view ----------------------------------------------------------------------
+    ax2 = fig.add_axes([0.60, 0.17, 0.27, 0.62])
     if deci is not None:
         V = np.asarray(deci.vertices)
-        ax2.scatter(V[:, 0], V[:, 1], s=1.5, c="0.85", alpha=0.5, edgecolors="none", zorder=0)
+        ax2.scatter(V[:, 0], V[:, 1], s=1.4, c="0.86", alpha=0.5, edgecolors="none", zorder=0)
     if contact is not None:
-        ax2.scatter(contact[:, 0], contact[:, 1], s=6, c="#1a9850", alpha=0.30,
+        ax2.scatter(contact[:, 0], contact[:, 1], s=6, c=GREEN, alpha=0.28,
                     edgecolors="none", zorder=1)
     _curve_lines(ax2, P, seg_len, (0, 1))
-    ax2.scatter(P[:, 0], P[:, 1], c=order, cmap=cmap, s=14, zorder=4)
-    ax2.set_aspect("equal", adjustable="datalim")     # fill the rect, pad data limits (no float)
-    ax2.set_xlabel("$x$ (mm)"); ax2.set_ylabel("$y$ (mm)")
-    ax2.set_title("(b) top view")
+    ax2.scatter(P[:, 0], P[:, 1], c=order, cmap=cmap, s=15, zorder=4)
+    ax2.set_aspect("equal", adjustable="datalim")
+    ax2.set_xlabel("$x$ (mm)", fontsize=9); ax2.set_ylabel("$y$ (mm)", fontsize=9)
+    ax2.tick_params(labelsize=7)
     for s in ax2.spines.values():
         s.set_color("0.6")
 
-    cax = fig.add_axes([0.93, 0.20, 0.016, 0.62])
+    # ---- colourbar (with the A|B split marked) ---------------------------------------------
+    cax = fig.add_axes([0.905, 0.20, 0.018, 0.55])
     cb = fig.colorbar(sc, cax=cax)
-    cb.set_label(clabel, fontsize=9); cb.outline.set_linewidth(0.5)
-    cb.ax.tick_params(labelsize=8)
-    if title:
-        fig.suptitle(title, y=1.02, fontsize=11)
+    cb.set_label(clabel, fontsize=8.5); cb.outline.set_linewidth(0.5)
+    cb.ax.tick_params(labelsize=7.5)
+    if tier_b is not None:
+        cb.ax.axhline(tier_b, color="0.15", lw=1.0)
+        cb.ax.annotate("Tier A", xy=(1.0, tier_b), xytext=(3.2, -8), textcoords="offset points",
+                       fontsize=7, color="#2166ac", annotation_clip=False)
+        cb.ax.annotate("Tier B", xy=(1.0, tier_b), xytext=(3.2, 4), textcoords="offset points",
+                       fontsize=7, color="#b2182b", annotation_clip=False)
 
-    out.parent.mkdir(parents=True, exist_ok=True)
+    # ---- one-line legend strip at the bottom (its own lane) --------------------------------
+    handles = [Line2D([0], [0], marker="o", color="none", markerfacecolor=GREEN, markersize=6,
+                      alpha=0.6, label="real scanned patch (what we have)"),
+               Line2D([0], [0], marker="o", color="none", markerfacecolor="#2166ac", markersize=6,
+                      label="generated: Tier A (trusted)"),
+               Line2D([0], [0], marker="o", color="none", markerfacecolor="#b2182b", markersize=6,
+                      label="generated: Tier B (lateral — validate)")]
+    fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=8, frameon=False,
+               handletextpad=0.3, columnspacing=1.4, bbox_to_anchor=(0.46, -0.01))
+
     pdf = out.with_suffix(".pdf"); png = out.with_suffix(".png")
+    out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(pdf, bbox_inches="tight"); fig.savefig(png, bbox_inches="tight")
     print(f"saved figure -> {pdf}  and  {png}")
 
@@ -313,8 +334,9 @@ def main() -> None:
     deci = _decimate(mesh) if mesh is not None else None
     if mesh is not None and deci is None:
         print("  (mesh decimation unavailable; drawing trajectory only)")
+    tier_b = args.tier_b_deg if (contact is not None and cval is not None) else None
     render(P, A, deci, Path(args.out), args.title, cval=cval, clabel=clabel, cmap=cmap,
-           contact=contact, seg_len=seg_len)
+           contact=contact, seg_len=seg_len, tier_b=tier_b)
 
 
 if __name__ == "__main__":
