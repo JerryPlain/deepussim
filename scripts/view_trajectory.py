@@ -146,55 +146,77 @@ def _equal_3d(ax, P):
         pass
 
 
+def _curve_lines(ax, P, seg_len, dims):
+    """Draw each curve (a contiguous block of ``seg_len`` poses) as its own light line.
+
+    Avoids the single zig-zag path that jumps between fanned curves; ``dims`` selects the columns
+    (3D: (0,1,2); top view: (0,1)). Returns nothing — draws onto ``ax``.
+    """
+    if not seg_len:
+        ax.plot(*[P[:, d] for d in dims], "-", c=PATH_C, lw=0.7, alpha=0.6, zorder=2)
+        return
+    for s in range(0, len(P), seg_len):
+        seg = P[s:s + seg_len]
+        ax.plot(*[seg[:, d] for d in dims], "-", c=PATH_C, lw=0.8, alpha=0.55, zorder=2)
+
+
 def render(P, A, deci, out: Path, title: str | None, cval=None, clabel: str = "scan order",
-           cmap: str | None = None):
+           cmap: str | None = None, contact=None, seg_len: int | None = None):
     import matplotlib.pyplot as plt
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
     order = np.arange(len(P)) if cval is None else np.asarray(cval)
     cmap = cmap or CMAP
-    fig = plt.figure(figsize=(7.2, 3.0))
+    fig = plt.figure(figsize=(7.6, 3.2))
     # explicit rectangles so the 3D and the equal-aspect 2D panel stay aligned
     ax = fig.add_axes([0.00, 0.02, 0.52, 0.90], projection="3d")
     if deci is not None:
         tris = Poly3DCollection(np.asarray(deci.vertices)[np.asarray(deci.faces)],
-                                alpha=0.16, facecolor="#9fb3c8", edgecolor="none")
+                                alpha=0.14, facecolor="#9fb3c8", edgecolor="none")
         ax.add_collection3d(tris)
-    ax.plot(P[:, 0], P[:, 1], P[:, 2], "-", c=PATH_C, lw=0.7, alpha=0.7, zorder=2)
-    ax.quiver(P[:, 0], P[:, 1], P[:, 2], A[:, 0], A[:, 1], A[:, 2], length=12.0,
-              color=ACCENT, linewidth=0.6, arrow_length_ratio=0.35, zorder=3)
-    sc = ax.scatter(P[:, 0], P[:, 1], P[:, 2], c=order, cmap=cmap, s=12,
+    if contact is not None:                              # the real scanned footprint we leave
+        ax.scatter(contact[:, 0], contact[:, 1], contact[:, 2], s=5, c="#1a9850", alpha=0.35,
+                   edgecolors="none", depthshade=False, zorder=2, label="real scanned patch")
+    _curve_lines(ax, P, seg_len, (0, 1, 2))
+    ax.quiver(P[:, 0], P[:, 1], P[:, 2], A[:, 0], A[:, 1], A[:, 2], length=11.0,
+              color=ACCENT, linewidth=0.5, arrow_length_ratio=0.35, alpha=0.7, zorder=3)
+    sc = ax.scatter(P[:, 0], P[:, 1], P[:, 2], c=order, cmap=cmap, s=14,
                     depthshade=False, zorder=4)
     _equal_3d(ax, P)
     ax.set_xlabel("$x$ (mm)", labelpad=-2); ax.set_ylabel("$y$ (mm)", labelpad=-2)
     ax.set_zlabel("$z$ (mm)", labelpad=-4)
     ax.tick_params(pad=-1)
-    ax.view_init(elev=22, azim=-58)
+    ax.view_init(elev=24, azim=-62)
     for pane in (ax.xaxis, ax.yaxis, ax.zaxis):
         pane.pane.set_facecolor("white"); pane.pane.set_edgecolor("0.85")
         pane._axinfo["grid"].update(color="0.92", linewidth=0.4)
+    if contact is not None:
+        ax.legend(loc="upper left", fontsize=7, frameon=False, handletextpad=0.2, borderpad=0.1)
     ax.set_title("(a) perspective")
 
-    # (b) top view 2D — the raster pattern reads crisply in print (axial is into the page here,
-    # so the arrows live in panel (a); panel (b) shows the scan path + order cleanly)
-    ax2 = fig.add_axes([0.60, 0.16, 0.30, 0.74])
+    # (b) top view 2D — the curve pattern reads crisply in print (axial is into the page here,
+    # so the arrows live in panel (a); panel (b) shows the curves + colour cleanly)
+    ax2 = fig.add_axes([0.605, 0.16, 0.30, 0.74])
     if deci is not None:
         V = np.asarray(deci.vertices)
         ax2.scatter(V[:, 0], V[:, 1], s=1.5, c="0.85", alpha=0.5, edgecolors="none", zorder=0)
-    ax2.plot(P[:, 0], P[:, 1], "-", c=PATH_C, lw=0.7, alpha=0.7, zorder=2)
-    ax2.scatter(P[:, 0], P[:, 1], c=order, cmap=cmap, s=13, zorder=4)
+    if contact is not None:
+        ax2.scatter(contact[:, 0], contact[:, 1], s=6, c="#1a9850", alpha=0.30,
+                    edgecolors="none", zorder=1)
+    _curve_lines(ax2, P, seg_len, (0, 1))
+    ax2.scatter(P[:, 0], P[:, 1], c=order, cmap=cmap, s=14, zorder=4)
     ax2.set_aspect("equal", adjustable="datalim")     # fill the rect, pad data limits (no float)
     ax2.set_xlabel("$x$ (mm)"); ax2.set_ylabel("$y$ (mm)")
     ax2.set_title("(b) top view")
     for s in ax2.spines.values():
         s.set_color("0.6")
 
-    cax = fig.add_axes([0.925, 0.20, 0.016, 0.62])
+    cax = fig.add_axes([0.93, 0.20, 0.016, 0.62])
     cb = fig.colorbar(sc, cax=cax)
     cb.set_label(clabel, fontsize=9); cb.outline.set_linewidth(0.5)
     cb.ax.tick_params(labelsize=8)
     if title:
-        fig.suptitle(title, y=1.01, fontsize=11)
+        fig.suptitle(title, y=1.02, fontsize=11)
 
     out.parent.mkdir(parents=True, exist_ok=True)
     pdf = out.with_suffix(".pdf"); png = out.with_suffix(".png")
@@ -268,16 +290,18 @@ def main() -> None:
 
     P, A = poses[:, :3, 3], poses[:, :3, 2]
     print(f"{src}: {len(poses)} poses, extent (mm) {np.ptp(P, 0).round(1)}")
-    cval = clabel = cmap = None
+    cval = clabel = cmap = contact = None
+    seg_len = args.per_line if args.trajectory == "surface-curves" else None
     if mesh is not None and args.trajectory == "surface-curves" and not args.trajectory_file:
         # winding-independent Tier metric: normal oriented by the real approach, not mesh normals
         from deepussim.pipeline.sampling import pose_surface_deviation
         rc = _contact_poses_cbct(mesh, bags=args.bags, sequences=args.sequences)
+        contact = rc[:, :3, 3]                                # the real footprint, to overlay
         standoff, dev = pose_surface_deviation(mesh, poses, rc)
         n_b = int(((dev > args.tier_b_deg) & (dev <= 90)).sum()); n_x = int((dev > 90).sum())
         print(f"  standoff (mm): mean {standoff.mean():.2f}   Tier @ {args.tier_b_deg:g} deg: "
               f"A {len(dev) - n_b - n_x}  B(lateral) {n_b}  broken(>90) {n_x}")
-        cval, clabel, cmap = dev, "axial-normal dev (deg)", "RdYlBu_r"
+        cval, clabel, cmap = dev, "surface-turn from patch (deg)", "RdYlBu_r"
     elif mesh is not None:
         standoff, cos = surface_stats(mesh, P, A)
         print(f"  standoff (mm): mean {standoff.mean():.2f}   "
@@ -289,7 +313,8 @@ def main() -> None:
     deci = _decimate(mesh) if mesh is not None else None
     if mesh is not None and deci is None:
         print("  (mesh decimation unavailable; drawing trajectory only)")
-    render(P, A, deci, Path(args.out), args.title, cval=cval, clabel=clabel, cmap=cmap)
+    render(P, A, deci, Path(args.out), args.title, cval=cval, clabel=clabel, cmap=cmap,
+           contact=contact, seg_len=seg_len)
 
 
 if __name__ == "__main__":
