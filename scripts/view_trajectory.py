@@ -245,6 +245,63 @@ def render(P, A, deci, out: Path, title: str | None, cval=None, clabel: str = "s
     print(f"saved figure -> {pdf}  and  {png}")
 
 
+def render_tiers(P, dev, deci, contact, out: Path, title: str | None, tier_b: float):
+    """Two side-by-side 3D panels: Tier A poses (trusted) | Tier B poses (lateral frontier).
+
+    Same viewpoint and limits in both, the real scanned patch (green) in each for reference — so
+    'which generated poses are trusted vs the frontier' reads at a glance. ``dev`` is the per-pose
+    surface-turn (deg); the split is at ``tier_b``.
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+    from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+    GREEN, BLUE, RED = "#1a9850", "#2166ac", "#b2182b"
+    dev = np.asarray(dev)
+    panels = [("(a) Tier A — trusted", dev <= tier_b, BLUE),
+              ("(b) Tier B — lateral frontier", dev > tier_b, RED)]
+    fig = plt.figure(figsize=(8.6, 4.3))
+    if title:
+        fig.text(0.5, 0.965, title, ha="center", va="center", fontsize=11.5)
+
+    for (cap, mask, col), rect, cx in zip(panels, ([0.01, 0.10, 0.47, 0.74],
+                                                   [0.52, 0.10, 0.47, 0.74]), (0.25, 0.76)):
+        ax = fig.add_axes(rect, projection="3d")
+        if deci is not None:
+            tris = Poly3DCollection(np.asarray(deci.vertices)[np.asarray(deci.faces)],
+                                    alpha=0.10, facecolor="#9fb3c8", edgecolor="none")
+            ax.add_collection3d(tris)
+        if contact is not None:
+            ax.scatter(contact[:, 0], contact[:, 1], contact[:, 2], s=5, c=GREEN, alpha=0.28,
+                       edgecolors="none", depthshade=False, zorder=2)
+        Q = P[mask]
+        if len(Q):
+            ax.scatter(Q[:, 0], Q[:, 1], Q[:, 2], s=16, c=col, depthshade=False, zorder=4)
+        _equal_3d(ax, P)                                  # identical limits in both panels
+        ax.set_xlabel("$x$ (mm)", labelpad=1); ax.set_ylabel("$y$ (mm)", labelpad=1)
+        ax.set_zlabel("$z$ (mm)", labelpad=1)
+        ax.tick_params(labelsize=7, pad=0)
+        ax.view_init(elev=24, azim=-62)
+        for pane in (ax.xaxis, ax.yaxis, ax.zaxis):
+            pane.pane.set_facecolor("white"); pane.pane.set_edgecolor("0.85")
+            pane._axinfo["grid"].update(color="0.93", linewidth=0.4)
+        fig.text(cx, 0.89, f"{cap}  ({int(mask.sum())} poses)", ha="center", fontsize=9.5,
+                 style="italic", color=col)
+
+    handles = [Line2D([0], [0], marker="o", color="none", markerfacecolor=GREEN, markersize=6,
+                      alpha=0.6, label="real scanned patch (what we have)"),
+               Line2D([0], [0], marker="o", color="none", markerfacecolor=BLUE, markersize=6,
+                      label="Tier A (trusted)"),
+               Line2D([0], [0], marker="o", color="none", markerfacecolor=RED, markersize=6,
+                      label="Tier B (lateral — validate)")]
+    fig.legend(handles=handles, loc="lower center", ncol=3, fontsize=8.5, frameon=False,
+               handletextpad=0.3, columnspacing=1.4, bbox_to_anchor=(0.5, -0.01))
+    pdf = out.with_suffix(".pdf"); png = out.with_suffix(".png")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(pdf, bbox_inches="tight"); fig.savefig(png, bbox_inches="tight")
+    print(f"saved split figure -> {pdf}  and  {png}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -284,6 +341,9 @@ def main() -> None:
                     help="scatter colour: 'order' (scan order) or 'deviation' (axial-vs-surface-"
                          "normal angle, Tier A/B; the default for --trajectory surface-curves)")
     ap.add_argument("--title", help="optional figure suptitle")
+    ap.add_argument("--split", action="store_true",
+                    help="surface-curves: render Tier A and Tier B in two separate panels instead "
+                         "of one colour-coded figure")
     ap.add_argument("--usetex", action="store_true", help="render with a real LaTeX install")
     args = ap.parse_args()
 
@@ -334,9 +394,12 @@ def main() -> None:
     deci = _decimate(mesh) if mesh is not None else None
     if mesh is not None and deci is None:
         print("  (mesh decimation unavailable; drawing trajectory only)")
-    tier_b = args.tier_b_deg if (contact is not None and cval is not None) else None
-    render(P, A, deci, Path(args.out), args.title, cval=cval, clabel=clabel, cmap=cmap,
-           contact=contact, seg_len=seg_len, tier_b=tier_b)
+    if args.split and contact is not None and cval is not None:
+        render_tiers(P, cval, deci, contact, Path(args.out), args.title, args.tier_b_deg)
+    else:
+        tier_b = args.tier_b_deg if (contact is not None and cval is not None) else None
+        render(P, A, deci, Path(args.out), args.title, cval=cval, clabel=clabel, cmap=cmap,
+               contact=contact, seg_len=seg_len, tier_b=tier_b)
 
 
 if __name__ == "__main__":
