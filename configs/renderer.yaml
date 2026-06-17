@@ -12,10 +12,11 @@ renderer:
 
 # Curvilinear (convex) probe geometry (deepussim.us.reslice.ProbeGeometry).
 # Fitted from the real US fan via scripts/fit_us_geometry.py (--us-spacing 0.166112957,
-# both phantom sequences; apex (434,-270) px, r0=316 r1=927 px, fit residual 3.1 px).
+# scans 1/8/15 of the 2026-06-12 collection; apex (440,-262) px, r0=308 r1=917 px,
+# fit residual 0.3 px). Same probe/depth as the prior fit (52.5/68.1/101.5, resid 3.1 px).
 geometry:
-  radius_mm: 52.5          # convex-array radius (virtual apex -> transducer face)
-  fov_deg: 68.1            # total sector angle (lateral field of view)
-  depth_mm: 101.5          # imaging depth along each beam, from the face outward
+  radius_mm: 51.1          # convex-array radius (virtual apex -> transducer face)
+  fov_deg: 69.3            # total sector angle (lateral field of view)
+  depth_mm: 101.2          # imaging depth along each beam, from the face outward
   n_lat: 256               # scan lines (image width, px)
   n_ax: 512                # samples per scan line (image height, px)
