@@ -22,6 +22,7 @@ env/
 # Data — never commit raw scans / generated datasets
 # Anchored to the repo root so they do NOT also match the src/deepussim/data package.
 /data/
+/data_old/
 /datasets/
 *.nii
 *.nii.gz
