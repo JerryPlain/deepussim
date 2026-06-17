@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..geometry import make_transform, compose, rot_x, rot_z
+from ..geometry import make_transform, compose, rot_y
 from ..data.volume import Volume
 
 M_TO_MM = 1000.0
@@ -70,14 +70,16 @@ def seat_phantom_placement(mesh, contact_origins_m, base, *, lie_down=True) -> n
     applied as-is it stands the phantom on end, so the imaging fan grazes the surface tangentially.
     The real rig has the phantom LYING **belly-up** — the probe presses straight DOWN onto the
     up-facing anterior surface (verified: the real EE axial is world -z) and images into the body.
-    The lie-down that reproduces this is ``Rx(90 deg) . Rz(180 deg)`` about the phantom centre:
-    ``Rx(90)`` tips it off-end and ``Rz(180)`` flips it belly-up. (Validated in sim: 14/14 real
-    poses reachable pressing from above, fan 82% inside tissue, vs the earlier belly-down
-    ``Rx(90)`` alone which imaged out of the body at ~10% — see CHANGELOG 2026-06-04. LC2 is an
-    unreliable arbiter here: the low-texture body makes it *prefer* the wrong belly-down graze, so
-    the physical prior + in-tissue geometry decide the orientation, not LC2.) We bake that roll
-    into one rigid transform from the CBCT-metre frame (= DICOM mm / 1000) to the robot world, then
-    seat the surface onto the real contact cloud (a residual ~cm offset remains for LC2 to grind).
+    The lie-down is a 90 deg roll about the phantom centre; its exact axis depends on the CBCT's
+    DICOM export orientation, so it must be re-derived per scan as the orientation that puts the
+    imaging fan INSIDE the body — picked by maximising in-volume reslice coverage over the real
+    contact poses (sweep the 24 axis-aligned rotations). For the **2026-06-12** CBCT that is
+    ``Ry(-90 deg)`` (fan coverage 45% -> 98% vs the wrong roll); the earlier **2026-05-31** CBCT
+    used ``Rx(90).Rz(180)``. LC2 is an unreliable arbiter here — the low-texture body makes it
+    *prefer* the wrong belly-down graze — so in-tissue coverage decides the orientation, not LC2.
+    We bake the roll into one rigid transform from the CBCT-metre frame (= DICOM mm / 1000) to the
+    robot world, then seat the surface onto the real contact cloud (a residual ~cm offset remains
+    for LC2 to grind).
 
     ``mesh`` is the phantom surface (trimesh, CBCT mm); ``contact_origins_m`` are the probe-face
     positions in the robot/world frame (m) for the in-contact frames. Reslicing uses the SAME
@@ -89,7 +91,7 @@ def seat_phantom_placement(mesh, contact_origins_m, base, *, lie_down=True) -> n
     base = np.asarray(base, dtype=float)
     origins = np.asarray(contact_origins_m, dtype=float)
     c_m = np.asarray(mesh.bounds, dtype=float).mean(0) / M_TO_MM       # phantom centre (m)
-    lie_R = rot_x(np.pi / 2.0) @ rot_z(np.pi)                         # tip off-end, then belly-up
+    lie_R = rot_y(-np.pi / 2.0)            # belly-up roll for the 2026-06-12 CBCT (see docstring)
     lie = make_transform(lie_R, [0.0, 0.0, 0.0]) if lie_down else np.eye(4)
     T = compose(base, lie, make_transform(np.eye(3), -c_m))           # lie-down about the centre
     placed = mesh.copy()
