@@ -42,14 +42,24 @@ T_EE_FROM_PROBE = invert(T_PROBE_FROM_EE)
 
 # Robot<->phantom placement, as delivered: applying it to CBCT/phantom-frame points yields
 # robot/world-frame points, i.e. it IS T_robot_from_phantom (== T_world_from_cbct, with
-# world == robot base and the phantom frame == the CBCT frame). ~180 deg about z,
-# t = (0.546, 0.393, 0.314) m.
+# world == robot base and the phantom frame == the CBCT frame). ~180 deg about z.
+#
+# 2026-06-12 collection: the new hand-eye calibration is published as a tf
+# parent_frame_id=franka (robot base) -> child_frame_id=camera (the CBCT/phantom frame), i.e.
+# exactly T_robot_from_phantom. t = (0.5445, 0.3551, 0.3156) m; rotation essentially unchanged
+# from the old matrix (diag -0.999/-0.999/+0.999), y-translation shifted ~38 mm (phantom
+# repositioned for the new session). PROVISIONAL: like the old one this must be re-resolved by
+# replay (scripts/verify_replay.py) against the NEW sequences once they are extracted, and the
+# belly-up roll in seat_phantom_placement re-checked against the new CBCT's DICOM orientation.
 T_ROBOT_FROM_PHANTOM = np.array([
-    [-0.9989, -0.0158, -0.0452, 0.5460],
-    [ 0.0162, -0.9998, -0.0091, 0.3930],
-    [-0.0451, -0.0098,  0.9989, 0.3135],
-    [ 0.0,     0.0,     0.0,    1.0000],
+    [-0.9988805840248178, -0.029483337597067026, -0.03699069697069639, 0.5445375623840216],
+    [ 0.029688116851141373, -0.9995467109497567, -0.004998834600006676, 0.3551386900786097],
+    [-0.03682654716469477, -0.006091422958769326,  0.9993031071653204, 0.31561909434512403],
+    [ 0.0,                  0.0,                    0.0,                 1.0],
 ])
+# Old (2026-05-31) matrix, kept for fallback / replay comparison:
+#   [-0.9989, -0.0158, -0.0452, 0.5460], [0.0162, -0.9998, -0.0091, 0.3930],
+#   [-0.0451, -0.0098,  0.9989, 0.3135], [0.0, 0.0, 0.0, 1.0]
 
 T_PHANTOM_FROM_ROBOT = invert(T_ROBOT_FROM_PHANTOM)
 
