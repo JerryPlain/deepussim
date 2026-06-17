@@ -20,8 +20,19 @@ import argparse
 import numpy as np
 
 from deepussim.calib.transforms import T_EE_FROM_PROBE, T_PROBE_FROM_EE, T_ROBOT_FROM_PHANTOM
-from deepussim.data.rosbag import extract_sequence
 from deepussim.geometry import invert, compose
+
+
+def _load_sequences(paths):
+    """Frame lists from pre-extracted .npz (keys: poses, contact) — no rosbags dep."""
+    from types import SimpleNamespace
+    seqs = {}
+    for p in paths:
+        d = np.load(p, allow_pickle=True)
+        P, C = d["poses"], d["contact"].astype(bool)
+        seqs[p] = SimpleNamespace(frames=[SimpleNamespace(pose=P[i], contact=bool(C[i]))
+                                          for i in range(len(P))])
+    return seqs
 
 
 def _probe_origins(frames, T_ee_from_probe):
@@ -42,13 +53,20 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--bags", nargs="+",
                     default=["data/rosbags/phantom.bag", "data/rosbags/phantom1.bag"])
+    ap.add_argument("--sequences", nargs="+",
+                    help="pre-extracted .npz (keys: poses, contact) INSTEAD of --bags (no rosbags dep)")
     ap.add_argument("--mesh", default="data/cbct/phantom_surface_m.stl",
                     help="phantom surface mesh in CBCT frame, metres")
     ap.add_argument("--n", type=int, default=60, help="frames sampled per class for the sweep")
     args = ap.parse_args()
 
     base_mesh = trimesh.load(args.mesh)
-    seqs = {b: extract_sequence(b) for b in args.bags}
+    if args.sequences:
+        seqs = _load_sequences(args.sequences)
+    else:
+        from deepussim.data.rosbag import extract_sequence   # needs the optional 'rosbags' lib
+        seqs = {b: extract_sequence(b) for b in args.bags}
+    names = list(seqs.keys())
 
     placements = {
         "place=T_WORLD_FROM_CBCT": T_ROBOT_FROM_PHANTOM,
@@ -56,8 +74,8 @@ def main() -> None:
     }
     mounts = {"mount=T_EE_FROM_PROBE": T_EE_FROM_PROBE, "mount=inverse       ": T_PROBE_FROM_EE}
 
-    # --- 2x2 sweep on contact frames of the first bag ---
-    bag0 = args.bags[0]
+    # --- 2x2 sweep on contact frames of the first sequence ---
+    bag0 = names[0]
     contact0 = _sample([f for f in seqs[bag0].frames if f.contact], args.n)
     print(f"== sweep on {bag0} ({len(contact0)} contact frames) ==")
     best = None
@@ -82,6 +100,9 @@ def main() -> None:
         row = []
         for label, sel in (("contact", True), ("dark", False)):
             fr = _sample([f for f in seq.frames if f.contact == sel], args.n)
+            if not fr:
+                row.append(f"{label} n/a (0 frames)")
+                continue
             d = np.abs(-pq.signed_distance(_probe_origins(fr, T_ep)))
             row.append(f"{label} median {np.median(d) * 100:5.2f}cm (<2cm {int((d < 0.02).mean() * 100):3d}%)")
         print(f"  {b}:  " + "   ".join(row))
