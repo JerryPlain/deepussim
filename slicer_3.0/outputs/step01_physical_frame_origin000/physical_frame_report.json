@@ -1,0 +1,364 @@
+{
+  "coordinate_convention": {
+    "raw_volume_frame": "DICOM LPS, millimetres",
+    "default_working_frame": "phantom-centred CBCT, millimetres",
+    "positive_x": "Left",
+    "positive_y": "Posterior",
+    "positive_z": "Superior",
+    "voxel_order": "ijk == SimpleITK xyz",
+    "sim_phantom_origin": "phantom local origin / centred mesh origin",
+    "sim_reslice_frame": "same axis directions as DICOM-LPS, translated so the phantom origin is (0,0,0)",
+    "slicer_display_note": "3D Slicer uses RAS internally: RAS = diag(-1,-1,1) @ LPS"
+  },
+  "phantom_centered_frame": {
+    "origin_source": "default_origin_000",
+    "origin_lps_mm": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "axis_alignment_with_dicom_lps": {
+      "phantom_local_x": "+DICOM_LPS_X / Left",
+      "phantom_local_y": "+DICOM_LPS_Y / Posterior",
+      "phantom_local_z": "+DICOM_LPS_Z / Superior",
+      "rotation_centered_from_lps": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "note": "The centered frame changes only the origin. It does not rotate or flip the DICOM-LPS axes, so simulator phantom local axes match DICOM-LPS before world placement."
+    },
+    "T_centered_from_lps_mm": [
+      [
+        1.0,
+        0.0,
+        0.0,
+        -0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0,
+        -0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0,
+        -0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "dicom_affine_centered_from_ijk_mm": [
+      [
+        0.807765,
+        0.0,
+        0.0,
+        -200.405838
+      ],
+      [
+        0.0,
+        0.807765,
+        0.0,
+        -105.215271
+      ],
+      [
+        0.0,
+        0.0,
+        0.8077650060422962,
+        -96.714211
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "recon_affine_centered_from_ijk_mm": [
+      [
+        -0.807765,
+        0.0,
+        0.0,
+        181.667
+      ],
+      [
+        0.0,
+        0.0,
+        -0.807765,
+        137.922
+      ],
+      [
+        0.0,
+        -0.807765,
+        0.0,
+        170.656
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "dicom_center_in_centered_mm": [
+      -9.369415500000002,
+      16.35336149999999,
+      36.97089750000001
+    ],
+    "recon_center_in_centered_mm": [
+      -9.369422499999985,
+      16.353367500000004,
+      36.97089250000002
+    ]
+  },
+  "dicom_series_id": "1.2.826.0.1.3680043.2.940.2022.32.20260612.150908.2754.1",
+  "dicom_file_count": 332,
+  "dicom": {
+    "name": "dicom",
+    "path": "D:\\Master1\\Praktikum\\deepussim-main\\cbct_20260612\\cbct_20260612\\DICOM1",
+    "size_ijk": [
+      474,
+      302,
+      332
+    ],
+    "spacing_mm": [
+      0.807765,
+      0.807765,
+      0.8077650060422962
+    ],
+    "origin_lps_mm": [
+      -200.405838,
+      -105.215271,
+      -96.714211
+    ],
+    "direction_lps_from_ijk": [
+      [
+        1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "affine_lps_from_ijk_mm": [
+      [
+        0.807765,
+        0.0,
+        0.0,
+        -200.405838
+      ],
+      [
+        0.0,
+        0.807765,
+        0.0,
+        -105.215271
+      ],
+      [
+        0.0,
+        0.0,
+        0.8077650060422962,
+        -96.714211
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "center_lps_mm": [
+      -9.369415500000002,
+      16.35336149999999,
+      36.97089750000001
+    ],
+    "det_direction": 1.0,
+    "max_orthogonality_error": 0.0
+  },
+  "recon": {
+    "name": "recon",
+    "path": "D:\\Master1\\Praktikum\\deepussim-main\\cbct_20260612\\cbct_20260612\\CBCT.mhd",
+    "size_ijk": [
+      474,
+      332,
+      302
+    ],
+    "spacing_mm": [
+      0.807765,
+      0.807765,
+      0.807765
+    ],
+    "origin_lps_mm": [
+      181.667,
+      137.922,
+      170.656
+    ],
+    "direction_lps_from_ijk": [
+      [
+        -1.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      [
+        0.0,
+        -1.0,
+        0.0
+      ]
+    ],
+    "affine_lps_from_ijk_mm": [
+      [
+        -0.807765,
+        0.0,
+        0.0,
+        181.667
+      ],
+      [
+        0.0,
+        0.0,
+        -0.807765,
+        137.922
+      ],
+      [
+        0.0,
+        -0.807765,
+        0.0,
+        170.656
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "center_lps_mm": [
+      -9.369422499999985,
+      16.353367500000004,
+      36.97089250000002
+    ],
+    "det_direction": 1.0,
+    "max_orthogonality_error": 0.0
+  },
+  "dicom_vs_recon": {
+    "same_size": false,
+    "spacing_abs_diff_mm": [
+      0.0,
+      0.0,
+      6.042296218922161e-09
+    ],
+    "origin_abs_diff_mm": [
+      382.072838,
+      243.137271,
+      267.37021100000004
+    ],
+    "direction_abs_diff": [
+      [
+        2.0,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        1.0,
+        1.0
+      ],
+      [
+        0.0,
+        1.0,
+        1.0
+      ]
+    ],
+    "affine_max_abs_diff": 382.072838,
+    "center_abs_diff_mm": [
+      6.999999982326699e-06,
+      6.000000013273166e-06,
+      4.9999999873762135e-06
+    ],
+    "T_dicom_ijk_from_recon_ijk": [
+      [
+        -1.0,
+        0.0,
+        0.0,
+        472.99999133411325
+      ],
+      [
+        0.0,
+        0.0,
+        -1.0,
+        301.0000074279029
+      ],
+      [
+        0.0,
+        -0.9999999925197351,
+        0.0,
+        330.99999257209714
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ]
+  },
+  "sim_alignment": {
+    "T_scan_optical_from_dicom_lps": [
+      [
+        -1.0,
+        -1.2246467991473532e-16,
+        0.0,
+        0.0
+      ],
+      [
+        7.498798913309288e-33,
+        -6.123233995736766e-17,
+        -1.0,
+        0.0
+      ],
+      [
+        1.2246467991473532e-16,
+        -1.0,
+        6.123233995736766e-17,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "recon_direction_matches_T_scan_optical_from_dicom_lps_max_abs_diff": 1.2246467991473532e-16,
+    "note": "Use the phantom-centred CBCT mm frame for slicer 3.0 downstream work. It keeps the same axis directions as DICOM-LPS but moves the sim phantom origin to (0,0,0). Only apply this Rx(90)*Rz(180) lie-down rotation when composing the measured scan/optical CBCT placement into the robot/sim world."
+  }
+}
