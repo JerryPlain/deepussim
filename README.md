@@ -139,10 +139,11 @@ construction — the same property that makes the anatomy masks free.
 A generated trajectory is **deterministic** from (mesh + params), so it need not be stored — the
 achieved poses are written into the dataset anyway; `--save-trajectory <path.npz>` optionally
 dumps it (`T_cbct_from_probe`, mm) for inspection or to reuse the identical poses across runs.
-[`scripts/view_trajectory.py`](scripts/view_trajectory.py) renders one (generate from the mesh,
-or load a saved `.npz`) — poses coloured by scan order (or by Tier-A/B surface-turn with
-`--color deviation`, the default for `surface-curves`) with inward axial arrows, plus the standoff
-it sits at — and saves the figure.
+Generation and plotting are split: [`scripts/gen_trajectory.py`](scripts/gen_trajectory.py)
+generates a trajectory from the mesh (`raster` / `surface-curves` / `contact`) and saves it to a
+`.npz`; [`plot_script/plots_reslice/trajectories.py`](plot_script/plots_reslice/trajectories.py)
+draws it (`--trajectory-file`, 3D + top view, belly-up world frame) or overlays the recorded
+sequences' coverage.
 
 ### Design invariants
 
@@ -199,10 +200,12 @@ src/deepussim/
   assets/franka_fr3/ vendored Franka Research 3 MJCF + meshes (MuJoCo Menagerie)
   pipeline/          pose sampling (contact_raster_ee, EE-oriented) + scale-up dataset generation
 configs/             renderer / phantom / trajectory parameters
-scripts/             run_scaleup.py, run_lc2.py, fit_us_geometry.py, extract_rosbags.py,
-                     verify_replay.py, view_sim.py, view_trajectory.py, smoke_sim.py,
+scripts/             run_scaleup.py, fit_us_geometry.py, extract_rosbags.py,
+                     verify_replay.py, view_sim.py, gen_trajectory.py, smoke_sim.py,
                      prep_renderer_data.py, train_renderer.py, eval_renderer.py (learned renderer),
                      slurm/ (Alex GPU jobs: scaleup_sim, renderer_train, renderer_eval)
+reslice/             clean CBCT->US reslicing package (build_frame, slice; replaces slicer_3.0)
+lc2/                 LC2 pose refinement on top of reslice (per-frame + multi-frame; replaces run_lc2)
 plot_script/         figure scripts (plot_sequence/dataset/renderer_*) + the LaTeX style system
 docs/                data_collection.md (field checklist), renderer.md (B1 design), data_layout.md
 tests/               geometry / reslice / renderer / neural_renderer / scaleup_gate / sampling / ...
@@ -359,12 +362,12 @@ python scripts/run_scaleup.py --volume data/cbct/intensity.nrrd \
 ```
 
 **5 · LC2 registration** (`{US ↔ CBCT slice}` pairs) — refine each real frame's calibration
-pose against the CBCT by image content. The belly-up lie-down + contact-seat placement is
-applied automatically from `--mesh`:
+pose against the CBCT by image content. Now the self-contained `lc2/` package on top of the
+`reslice/` slicing: `--method per-frame` (one nudge per frame) or `global` (one robust shared
+correction — recommended); reports LC2 and fan tissue-coverage so a gaming run is visible.
 
 ```bash
-python scripts/run_lc2.py --seq data/sequences/phantom.npz --volume data/cbct/intensity.nrrd \
-    --mesh data/cbct/phantom_surface.stl --us-spacing 0.166112957 --n 32 --out data/lc2_phantom.npz
+python -m lc2.run --method global --sequence data/sequences/scan1.npz --out data/lc2/scan1_global.npz
 ```
 
 ### Watch / verify the calibration
@@ -372,8 +375,9 @@ python scripts/run_lc2.py --seq data/sequences/phantom.npz --volume data/cbct/in
 ```bash
 python scripts/view_sim.py        # interactive viewer: arm sweeping the lying phantom
 python scripts/verify_replay.py   # geometric check of the probe-mount + placement calibration
-python scripts/view_trajectory.py --mesh data/cbct/phantom_surface.stl --trajectory raster \
-    --out data/trajectories/raster.png --save-trajectory data/trajectories/raster.npz  # render+save a trajectory
+python scripts/gen_trajectory.py --mesh data/cbct/phantom_surface.stl --trajectory raster \
+    --out data/trajectories/raster.npz                                   # generate + save a trajectory
+python -m plot_script.plots_reslice.trajectories --trajectory-file data/trajectories/raster.npz  # draw it
 ```
 
 ## Status
