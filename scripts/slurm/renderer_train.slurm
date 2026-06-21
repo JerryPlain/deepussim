@@ -10,7 +10,7 @@
 # training container):
 #     python scripts/prep_renderer_data.py \
 #         --sequences data/sequences/phantom.npz data/sequences/phantom1.npz \
-#         --volume data/cbct/intensity.nrrd --mesh data/cbct/phantom_surface.stl \
+#         --volume data/cbct_20260612/intensity.nrrd --mesh data/cbct_20260612/phantom_surface.stl \
 #         --config configs/renderer.yaml --out data/renderer
 #
 # Training itself is pure torch (already baked in deepussim.sif) — no container rebuild.

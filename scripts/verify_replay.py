@@ -55,7 +55,7 @@ def main() -> None:
                     default=["data/rosbags/phantom.bag", "data/rosbags/phantom1.bag"])
     ap.add_argument("--sequences", nargs="+",
                     help="pre-extracted .npz (keys: poses, contact) INSTEAD of --bags (no rosbags dep)")
-    ap.add_argument("--mesh", default="data/cbct/phantom_surface_m.stl",
+    ap.add_argument("--mesh", default="data/cbct_20260612/phantom_surface_m.stl",
                     help="phantom surface mesh in CBCT frame, metres")
     ap.add_argument("--n", type=int, default=60, help="frames sampled per class for the sweep")
     args = ap.parse_args()

@@ -25,8 +25,8 @@ Download from the Drive and place files at these paths (create the folders as ne
 
 ```
 data/
-  cbct/
-    Series4/                  raw CBCT DICOM (folder, from Drive)        [raw]
+  cbct_20260612/
+    DICOM1/                   raw CBCT DICOM (folder, from Drive)        [raw]
     intensity.nrrd            CBCT intensity volume, 470x308x326 @0.74mm [derived ①]
     labels.nrrd               TotalSegmentator label volume, 53 organs  [derived ③]
     labels_colortable.csv     label id -> organ name + color            [derived ③]
@@ -55,7 +55,7 @@ Notes:
 ```bash
 conda activate deepussim
 python -c "from deepussim.data.volume import load_volume; \
-v=load_volume('data/cbct/intensity.nrrd'); print(v.shape, v.spacing.round(3))"
+v=load_volume('data/cbct_20260612/intensity.nrrd'); print(v.shape, v.spacing.round(3))"
 # expect: (470, 308, 326) [0.743 0.743 0.743]
 ```
 
@@ -64,15 +64,15 @@ v=load_volume('data/cbct/intensity.nrrd'); print(v.shape, v.spacing.round(3))"
 If you only have the **raw** inputs, regenerate the derived assets:
 
 ### From the CBCT DICOM (3D Slicer 5.x)
-Load `data/cbct/Series4/DICOM` (DICOM module → Import → Load), then:
+Load `data/cbct_20260612/DICOM1` (DICOM module → Import → Load), then:
 
 1. **① intensity** — `File → Save Data`, save the volume as `intensity.nrrd` (or `.nii.gz`).
 2. **② phantom surface** — `Segment Editor` → Threshold (lower ≈ −500) to capture the solid
    body → `Apply` → right-click the segmentation → *Export visible segments to models* →
    `File → Save Data` the model as `phantom_surface.stl`. Then make the metres copy:
    ```bash
-   python -c "import trimesh; m=trimesh.load('data/cbct/phantom_surface.stl'); \
-   m.apply_scale(0.001); m.export('data/cbct/phantom_surface_m.stl')"
+   python -c "import trimesh; m=trimesh.load('data/cbct_20260612/phantom_surface.stl'); \
+   m.apply_scale(0.001); m.export('data/cbct_20260612/phantom_surface_m.stl')"
    ```
 3. **③ labels** — install the *TotalSegmentator* extension → run it on the volume
    (task `total`, speed `Fast`) → right-click the segmentation →

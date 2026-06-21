@@ -8,14 +8,14 @@ or the real rosbag ``replay`` (sim only).
 
     # no-sim: surface-constrained sweep over the real phantom (geometry branch):
     python scripts/run_scaleup.py \
-        --volume data/cbct/intensity.nrrd --labels data/cbct/labels.nrrd \
-        --mesh data/cbct/phantom_surface.stl --trajectory surface \
+        --volume data/cbct_20260612/intensity.nrrd --labels data/cbct_20260612/labels.nrrd \
+        --mesh data/cbct_20260612/phantom_surface.stl --trajectory surface \
         --config configs/renderer.yaml --out data/ds --n 64
 
     # sim: drive the SAME generated raster over the phantom and read contact force (needs a GPU):
     python scripts/run_scaleup.py --sim \
-        --volume data/cbct/intensity.nrrd --labels data/cbct/labels.nrrd \
-        --mesh data/cbct/phantom_surface.stl --trajectory raster \
+        --volume data/cbct_20260612/intensity.nrrd --labels data/cbct_20260612/labels.nrrd \
+        --mesh data/cbct_20260612/phantom_surface.stl --trajectory raster \
         --config configs/renderer.yaml --out data/ds_sim --headless \
         --save-trajectory data/trajectories/raster.npz
 """

@@ -2,8 +2,8 @@
 # Run a command inside deepussim.sif with the GPU and the live repo.
 #
 #   apptainer/run.sh python scripts/run_scaleup.py --sim \
-#       --volume data/cbct/intensity.nrrd --labels data/cbct/labels.nrrd \
-#       --mesh data/cbct/phantom_surface.stl --trajectory replay \
+#       --volume data/cbct_20260612/intensity.nrrd --labels data/cbct_20260612/labels.nrrd \
+#       --mesh data/cbct_20260612/phantom_surface.stl --trajectory replay \
 #       --config configs/renderer.yaml --out data/ds_sim --headless
 #
 # - `--nv` passes through the host NVIDIA driver (Genesis CUDA kernels).

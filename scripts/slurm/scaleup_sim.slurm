@@ -23,9 +23,9 @@ cd "$REPO"
 
 # Inputs live in the repo's data/ (bind-mounted via --pwd in run.sh). Override OUT to $WORK
 # to keep large datasets off the repo workspace.
-VOLUME="${VOLUME:-data/cbct/intensity.nrrd}"
-LABELS="${LABELS:-data/cbct/labels.nrrd}"
-MESH="${MESH:-data/cbct/phantom_surface.stl}"
+VOLUME="${VOLUME:-data/cbct_20260612/intensity.nrrd}"
+LABELS="${LABELS:-data/cbct_20260612/labels.nrrd}"
+MESH="${MESH:-data/cbct_20260612/phantom_surface.stl}"
 OUT="${OUT:-data/ds_sim}"
 TRAJ="${TRAJ:-contact}"   # 'contact': densify the real scanned patch, orientation from the real
                           # EE poses (reliable since the orientation fix). 'replay': re-drive the

@@ -10,7 +10,7 @@ registration never enters. See docs/renderer.md.
 
     python scripts/prep_renderer_data.py \
         --sequences data/sequences/phantom.npz data/sequences/phantom1.npz \
-        --volume data/cbct/intensity.nrrd --mesh data/cbct/phantom_surface.stl \
+        --volume data/cbct_20260612/intensity.nrrd --mesh data/cbct_20260612/phantom_surface.stl \
         --config configs/renderer.yaml --us-spacing 0.166112957 --out data/renderer
 """
 from __future__ import annotations

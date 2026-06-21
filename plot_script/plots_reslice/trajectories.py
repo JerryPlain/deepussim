@@ -31,7 +31,7 @@ from reslice._geometry import compose
 from reslice.io import load_transform_4x4
 
 DEFAULT_SEQ_DIR = _REPO_ROOT / "data" / "sequences"
-DEFAULT_MESH = _REPO_ROOT / "data" / "cbct" / "phantom_surface.stl"
+DEFAULT_MESH = _REPO_ROOT / "data" / "cbct_20260612" / "phantom_surface.stl"
 DEFAULT_PLACEMENT = _REPO_ROOT / "reslice" / "outputs" / "world_from_phantom_liedown.txt"
 DEFAULT_OUT = _REPO_ROOT / "figures" / "reslice" / "all_trajectories.png"
 

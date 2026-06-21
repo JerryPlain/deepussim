@@ -315,7 +315,7 @@ Run the calibrated generator from the raw inputs, in order. Steps 1–3 and 5 ar
 step 4b (the sim force channel) needs a CUDA GPU. `us_spacing = 0.166112957` mm/px is Feng's
 measured US pixel size.
 
-**1 · Assets** — place `data/cbct/` (intensity + label NRRD, surface STL) and `data/rosbags/`
+**1 · Assets** — place `data/cbct_20260612/` (intensity + label NRRD, surface STL) and `data/rosbags/`
 per [`docs/data_layout.md`](docs/data_layout.md). The volume/mesh/label are exported once from
 the CBCT DICOM in 3D Slicer.
 
@@ -340,8 +340,8 @@ US-like image, and read anatomy masks free from the label volume.
   *4a · no-sim* (geometric poses, CPU) — surface-constrained sweep over the phantom:
 
 ```bash
-python scripts/run_scaleup.py --volume data/cbct/intensity.nrrd \
-    --labels data/cbct/labels.nrrd --mesh data/cbct/phantom_surface.stl \
+python scripts/run_scaleup.py --volume data/cbct_20260612/intensity.nrrd \
+    --labels data/cbct_20260612/labels.nrrd --mesh data/cbct_20260612/phantom_surface.stl \
     --trajectory surface --config configs/renderer.yaml --out data/ds --n 64
 ```
 
@@ -350,8 +350,8 @@ python scripts/run_scaleup.py --volume data/cbct/intensity.nrrd \
   ~few-N contact, writing (US image + pose + anatomy mask + contact force):
 
 ```bash
-python scripts/run_scaleup.py --volume data/cbct/intensity.nrrd \
-    --labels data/cbct/labels.nrrd --mesh data/cbct/phantom_surface.stl \
+python scripts/run_scaleup.py --volume data/cbct_20260612/intensity.nrrd \
+    --labels data/cbct_20260612/labels.nrrd --mesh data/cbct_20260612/phantom_surface.stl \
     --config configs/renderer.yaml --out data/ds_sim --sim --headless --n 64
 # drop --headless to watch live in the Genesis viewer; --force-n / --contact-timeconst tune the contact
 ```
@@ -375,7 +375,7 @@ python -m lc2.run --method global --sequence data/sequences/scan1.npz --out data
 ```bash
 python scripts/view_sim.py        # interactive viewer: arm sweeping the lying phantom
 python scripts/verify_replay.py   # geometric check of the probe-mount + placement calibration
-python scripts/gen_trajectory.py --mesh data/cbct/phantom_surface.stl --trajectory raster \
+python scripts/gen_trajectory.py --mesh data/cbct_20260612/phantom_surface.stl --trajectory raster \
     --out data/trajectories/raster.npz                                   # generate + save a trajectory
 python -m plot_script.plots_reslice.trajectories --trajectory-file data/trajectories/raster.npz  # draw it
 ```

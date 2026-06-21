@@ -66,7 +66,7 @@ single orientation → first model is a probe; it grows with Friday's collection
 ```bash
 # 1) build pools once (CPU/conda)
 python scripts/prep_renderer_data.py --sequences data/sequences/*.npz \
-    --volume data/cbct/intensity.nrrd --mesh data/cbct/phantom_surface.stl \
+    --volume data/cbct_20260612/intensity.nrrd --mesh data/cbct_20260612/phantom_surface.stl \
     --config configs/renderer.yaml --out data/renderer
 # 2) train on the GPU (existing sif — training is pure torch, no rebuild)
 sbatch scripts/slurm/renderer_train.slurm

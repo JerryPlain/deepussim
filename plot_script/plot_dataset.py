@@ -8,7 +8,7 @@ figures (PNG+PDF) under figures/<dataset-name>/:
     samples.{png,pdf}    a montage: CBCT slice / rendered US / anatomy-mask overlay
 
     python plot_script/plot_dataset.py data/ds_sim                 # + --volume for slice context
-    python plot_script/plot_dataset.py data/ds_sim --volume data/cbct/intensity.nrrd
+    python plot_script/plot_dataset.py data/ds_sim --volume data/cbct_20260612/intensity.nrrd
 
 A quick data-quality check after a scale-up run: are forces near the target, is coverage the
 real patch, do masks look sane. (The US image is the placeholder renderer until B1 lands.)

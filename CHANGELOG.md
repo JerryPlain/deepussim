@@ -155,7 +155,7 @@ measured instead of guessed — completing the `U_T_img` intrinsic of the geomet
   sequences; apex (434,−270) px, r0=316 r1=927 px, residual 3.1 px): `radius_mm 52.5`,
   `fov_deg 68.1`, `depth_mm 101.5` (were placeholder 55/70/110).
 
-> ⚠️ **CT spacing to confirm with Feng.** `data/cbct/intensity.nrrd` reports 0.742822 mm
+> ⚠️ **CT spacing to confirm with Feng.** `data/cbct_20260612/intensity.nrrd` reports 0.742822 mm
 > isotropic (raw NRRD `space directions`, confirmed by SimpleITK), but Feng's `ct_spacing` is
 > 0.810738 (~9% off). Likely the NRRD was resampled on export; the true physical CT scale must
 > be confirmed before the CBCT-side mm calibration is trusted. The US side (0.166) is unaffected.

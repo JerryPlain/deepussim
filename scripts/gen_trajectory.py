@@ -11,9 +11,9 @@ Modes:
   * ``surface-curves``        — drape curves out onto the lateral sides (needs --sequences),
                                 extending past the scanned patch (the Stage-2 frontier).
 
-    python scripts/gen_trajectory.py --mesh data/cbct/phantom_surface.stl --trajectory raster \
+    python scripts/gen_trajectory.py --mesh data/cbct_20260612/phantom_surface.stl --trajectory raster \
         --out data/trajectories/raster.npz
-    python scripts/gen_trajectory.py --mesh data/cbct/phantom_surface.stl --trajectory surface-curves \
+    python scripts/gen_trajectory.py --mesh data/cbct_20260612/phantom_surface.stl --trajectory surface-curves \
         --sequences data/sequences/scan*.npz --out data/trajectories/curves.npz
 """
 from __future__ import annotations

@@ -81,7 +81,7 @@ One folder per session:
 
 ```
 session_YYYYMMDD/
-  cbct/              DICOM series (or NIfTI), fiducials visible
+  cbct_20260612/     DICOM series (or NIfTI), fiducials visible
   robot_log.csv      one row/sample: t, q1..q7, flange pos+quat, Fx..Tz   (rosbag/parquet ok)
   us/                image sequence or video + per-frame timestamps
   us_params.txt      probe type, depth_mm, width_mm or mm/px, freq, gain, TGC, dyn range, models
@@ -157,7 +157,7 @@ from **old + new** sequences together:
 # 1) rebuild pools from OLD + NEW sequences (combined → no forgetting)
 python scripts/prep_renderer_data.py \
     --sequences data/sequences/phantom.npz data/sequences/phantom1.npz data/sequences/<new>.npz \
-    --volume data/cbct/intensity.nrrd --mesh data/cbct/phantom_surface.stl \
+    --volume data/cbct_20260612/intensity.nrrd --mesh data/cbct_20260612/phantom_surface.stl \
     --config configs/renderer.yaml --out data/renderer_v2
 # 2) fine-tune from the existing checkpoint (fewer epochs, on the GPU)
 EPOCHS=100 DATA=data/renderer_v2 OUT=runs/renderer_v2 RESUME=runs/renderer_cut/generator.pt \
