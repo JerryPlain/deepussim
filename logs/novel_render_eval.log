@@ -1,0 +1,34 @@
+(A) realism ...
+(B) input in-distribution ...
+(D) artifact prevalence ...
+{
+  "n_novel": 243,
+  "n_real": 150,
+  "A_realism": {
+    "hist_w1": 0.0519771996357711,
+    "hist_w1_floor": 0.014009961152216411,
+    "nakagami_w1": 0.10317360973411807,
+    "nakagami_w1_floor": 0.07471664637886193,
+    "texture_frechet": 607.074254936033,
+    "texture_frechet_floor": 710.6568020193743
+  },
+  "B_input_in_distribution": {
+    "ood_threshold_train_p99": 7.945423679588609,
+    "novel_in_distribution_fraction": 0.9794238683127572,
+    "novel_md_mean": 2.750174067683739,
+    "train_md_mean": 2.1864602762480296
+  },
+  "D_artifact": {
+    "real_bottom_excess_p95": -0.012874934589490305,
+    "novel_artifact_fraction": 0.3045267489711934,
+    "novel_bottom_excess_mean": -0.015915046196906164,
+    "real_bottom_excess_mean": -0.040500800089600185
+  },
+  "verdict": {
+    "realism_ok": false,
+    "input_in_distribution_ok": true,
+    "artifact_ok": false
+  }
+}
+
+wrote /anvme/workspace/b306dd11-deepussim/deepussim/figures/8_novel_render_quality/novel_render_quality.png

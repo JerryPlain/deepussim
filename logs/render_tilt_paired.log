@@ -1,0 +1,83 @@
+warning: missing /anvme/workspace/b306dd11-deepussim/deepussim/reslice/outputs/frame_origin000/physical_frame_report.json; using image affine fallback
+source=data/trajectories/novel_tilt_valid.npz (trajectory) | checkpoint=runs/renderer_cut_paired_display_ep300_b2_lp005/generator.pt | n=243 shape=(660, 880) device=cpu
+rendered 4/243
+rendered 8/243
+rendered 12/243
+rendered 16/243
+rendered 20/243
+rendered 24/243
+rendered 28/243
+rendered 32/243
+rendered 36/243
+rendered 40/243
+rendered 44/243
+rendered 48/243
+rendered 52/243
+rendered 56/243
+rendered 60/243
+rendered 64/243
+rendered 68/243
+rendered 72/243
+rendered 76/243
+rendered 80/243
+rendered 84/243
+rendered 88/243
+rendered 92/243
+rendered 96/243
+rendered 100/243
+rendered 104/243
+rendered 108/243
+rendered 112/243
+rendered 116/243
+rendered 120/243
+rendered 124/243
+rendered 128/243
+rendered 132/243
+rendered 136/243
+rendered 140/243
+rendered 144/243
+rendered 148/243
+rendered 152/243
+rendered 156/243
+rendered 160/243
+rendered 164/243
+rendered 168/243
+rendered 172/243
+rendered 176/243
+rendered 180/243
+rendered 184/243
+rendered 188/243
+rendered 192/243
+rendered 196/243
+rendered 200/243
+rendered 204/243
+rendered 208/243
+rendered 212/243
+rendered 216/243
+rendered 220/243
+rendered 224/243
+rendered 228/243
+rendered 232/243
+rendered 236/243
+rendered 240/243
+rendered 243/243
+{
+  "source": "data/trajectories/novel_tilt_valid.npz",
+  "source_kind": "trajectory",
+  "checkpoint": "runs/renderer_cut_paired_display_ep300_b2_lp005/generator.pt",
+  "out": "data/rendered_us/novel_tilt_paired",
+  "archive": "data/rendered_us/novel_tilt_paired/rendered_us.npz",
+  "n_images": 243,
+  "image_shape": [
+    660,
+    880
+  ],
+  "generated_us_range": [
+    0.0,
+    0.9990382194519043
+  ],
+  "generated_us_unit_range": [
+    -1.0,
+    0.9980764985084534
+  ]
+}
