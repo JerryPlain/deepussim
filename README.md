@@ -107,36 +107,37 @@ gross error and aligns the surface, but saturates before mm precision (see Statu
 
 ### Trajectory generation
 
-A pose needs a surface **position** and an **orientation**. Key finding: measured against the real
-poses, the probe presses **straight down** (axial varies <0.6° over a sweep) and does **not** follow
-the surface normal — so orientation is borrowed from the **real EE poses**, never from mesh normals
-(the mesh-normal samplers `surface_sweep`/`surface_raster` are deprecated for that reason; the
-"non-watertight mesh" diagnosis was a red herring). Sim trajectories
-([`pipeline/sampling.py`](src/deepussim/pipeline/sampling.py), `run_scaleup.py --trajectory`):
+We generate novel probe trajectories by **tilting/fanning the probe**, not by moving it to new
+surface locations. The CBCT volume is small and the rosbag already swept most of the in-volume
+surface, so any *translation* large enough to be novel pushes the fan out of the volume and renders
+to black — **orientation is the axis with headroom**. The real probe presses **straight down** (its
+axial varies <0.6° over a sweep) and does *not* follow the surface normal, so orientation is always a
+bounded tilt off a **real EE pose**, never a mesh normal.
 
-- **`replay`** — drive the arm along the real rosbag EE poses; faithful reference, no new viewpoints.
-- **`contact_raster_ee`** (`contact`) — densify the scanned patch: serpentine raster over the real
-  contact cloud, orientation from the nearest real EE pose.
-- **`surface_curves_from_points`** (`surface-curves`) — leave the footprint onto the lateral sides a
-  real probe can't reach, still borrowing the down-press orientation.
+[`generate_tilt_trajectories.py`](renderer_training/generate_tilt_trajectories.py) takes the real
+scan lines, rocks/fans the probe about its own lateral/elevation axes, and clips every pose to
+`fraction_inside ≥ 0.9`. The result is novel **and** renderable **and** in-distribution at once: the
+tilted beam cuts new anatomy (mean beam novelty **27°**, content novelty **0.55** = 1−NCC vs the
+nearest real slice) while staying inside the volume (min **0.91**) and keeping the renderer's input
+in-regime. Visualised by [`tilt_novelty.py`](plot_script/plots_reslice/tilt_novelty.py) (figures/4);
+the rendered US and its GT-free quality are covered next.
 
-The pose stream (`T_cbct_from_probe`, mm) drives **both** the reslice and (via
-`calib.seat_phantom_placement`) the Genesis arm, so "where the probe is" and "which slice we image"
-are aligned by construction — which is what makes the anatomy masks free. Split tooling:
-[`scripts/gen_trajectory.py`](scripts/gen_trajectory.py) generates + saves a `.npz`;
-[`plot_script/plots_reslice/trajectories.py`](plot_script/plots_reslice/trajectories.py) draws it.
+The pose stream (`T_cbct_from_probe`, mm) drives **both** the reslice and — via
+`calib.seat_phantom_placement` — the Genesis arm, so "where the probe is" and "which slice we image"
+stay aligned by construction (this is what makes the anatomy masks free).
 
-> ⚠️ **Two axes of regime.** *Orientation* (down-press ↔ tilted) was supervised only at the single
-> down-press → tilting is extrapolation that needs new real collection. *Position* (scanned patch ↔
-> elsewhere) is the cheap axis. For the **renderer-data** path this is revisited below: novelty is
-> taken from probe *tilt* but the renderer's *input* (the CBCT slice) stays in-distribution, so it
-> renders — while tilt-specific echo *appearance* still awaits real tilted US.
+> **Legacy sim-arm trajectories** ([`pipeline/sampling.py`](src/deepussim/pipeline/sampling.py),
+> `run_scaleup.py --trajectory`): `replay` (faithful arm path along the real EE poses, no new views)
+> and `contact` / `surface-curves` (EE-oriented raster / curves over the surface). The mesh-normal
+> samplers `surface_sweep` / `surface_raster` are **deprecated** — the real probe does not follow the
+> normal ("non-watertight mesh" was a red herring).
 
-### Renderer choice, novel-trajectory data & GT-free quality
+### Renderer choice & generated-US quality
 
 The renderer-data workflow lives in [`renderer_training/`](renderer_training/) plus the figure
 scripts under [`plot_script/`](plot_script/); every figure is catalogued in
-[`figures/README.md`](figures/README.md), numbered by pipeline stage (1–8).
+[`figures/README.md`](figures/README.md), numbered by pipeline stage (1–8). The novel poses it
+renders come from the tilt generator above.
 
 - **Paired vs unpaired renderer — paired wins.** Both CUT variants are trained from the LC2 pairs
   (`train_cut_{paired,unpaired}.py`); [`renderer_eval.py`](renderer_training/renderer_eval.py) scores
@@ -145,14 +146,6 @@ scripts under [`plot_script/`](plot_script/); every figure is catalogued in
   texture-Fréchet). **Paired wins 6/0** — including on the realism metrics that are unpaired's own
   objective, so it is not just memorising the L1. `render_us_from_poses.py` defaults to the paired
   `generator.pt`.
-- **Novel trajectories come from probe *tilt*, not translation.** The CBCT volume is small and the
-  rosbag already swept most of the in-volume surface, so any *translation* large enough to be novel
-  pushes the fan out of the volume (unrenderable). Novelty is taken from **orientation** instead:
-  [`generate_tilt_trajectories.py`](renderer_training/generate_tilt_trajectories.py) rocks/fans the
-  probe about its own axes on the real scan lines and clips each pose to `fraction_inside ≥ 0.9`. The
-  beam cuts new anatomy (mean beam novelty **27°**, content novelty **0.55** = 1−NCC vs nearest real
-  slice) while staying renderable (min in-volume **0.91**) and in-distribution (orientation = a real
-  pose ± bounded tilt). Plotted by [`tilt_novelty.py`](plot_script/plots_reslice/tilt_novelty.py).
 - **GT-free quality of the generated US.** Novel poses have no paired real US, so
   [`novel_render_eval.py`](renderer_training/novel_render_eval.py) evaluates without ground truth:
   (A) realism vs the real US *set* (texture-Fréchet **0.85×** the real-vs-real floor, speckle 1.4×),
