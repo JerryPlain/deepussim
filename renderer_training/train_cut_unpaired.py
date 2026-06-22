@@ -62,10 +62,12 @@ def _load_checkpoint(model: CUTModel, checkpoint: str, device: str) -> list[str]
 
 
 def _write_losses_header(csv_path: Path, keys: list[str]) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
     csv_path.write_text("epoch," + ",".join(keys) + "\n", encoding="utf-8")
 
 
 def _append_losses(csv_path: Path, epoch: int, means: dict[str, float], keys: list[str]) -> None:
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("a", encoding="utf-8") as fh:
         fh.write(f"{epoch}," + ",".join(f"{means[k]:.6f}" for k in keys) + "\n")
 
@@ -113,6 +115,13 @@ def main() -> None:
         f"batches/epoch={len(dl)}",
         flush=True,
     )
+    print(
+        f"source={source} | target={target} | out={out} | "
+        f"src_shape={ds.src.images.shape} | tgt_shape={ds.tgt.images.shape} | batch={args.batch} "
+        f"lr={args.lr} epochs={args.epochs} ngf={args.ngf} ndf={args.ndf} "
+        f"n_blocks={args.n_blocks} num_patches={args.num_patches}",
+        flush=True,
+    )
 
     model = CUTModel(
         ngf=args.ngf,
@@ -139,6 +148,8 @@ def main() -> None:
     loss_keys: list[str] | None = None
     csv_path = out / "losses.csv"
     for epoch in range(1, args.epochs + 1):
+        if args.device == "cuda":
+            torch.cuda.reset_peak_memory_stats()
         t0 = time.time()
         agg: dict[str, float] = {}
 
@@ -169,7 +180,12 @@ def main() -> None:
         _append_losses(csv_path, epoch, means, loss_keys)
 
         msg = "  ".join(f"{key}={means[key]:.3f}" for key in loss_keys)
-        print(f"epoch {epoch:4d}/{args.epochs}  {msg}  ({time.time() - t0:.1f}s)", flush=True)
+        mem = ""
+        if args.device == "cuda":
+            alloc = torch.cuda.max_memory_allocated() / (1024 ** 3)
+            reserved = torch.cuda.max_memory_reserved() / (1024 ** 3)
+            mem = f"  cuda_peak={alloc:.1f}GiB reserved={reserved:.1f}GiB"
+        print(f"epoch {epoch:4d}/{args.epochs}  {msg}  ({time.time() - t0:.1f}s){mem}", flush=True)
 
         if epoch % args.sample_every == 0 or epoch == args.epochs:
             model.eval()
