@@ -30,14 +30,28 @@ flowchart TB
     USREAL[("Real US<br/>2 ROS1 rosbags")]
     PROBE[["Probe mesh<br/>(supplied)"]]
 
-    subgraph STAGE1["Stage 1 · real-to-sim — build and calibrate the data generator"]
+    subgraph STAGE1["Stage 1 · real-to-sim — build, calibrate &amp; validate the data generator"]
         direction TB
         ASSETS["Assets (3D Slicer / VTK)<br/>intensity volume · surface mesh · label"]
         CHAIN["Geometric chain (poses → CBCT voxels)<br/>p_C = C_T_R · R_T_E(t) · E_T_U · U_T_img · p_img"]
         LC2["LC2 registration<br/>grind the cm residual → aligned {US ↔ CBCT slice} pairs"]
-        REND["Learned renderer (CUT)<br/>CBCT slice → US-like image"]
-        TRAJ["Trajectory<br/>real EE poses → probe poses<br/>(replay; contact_raster_ee: position from contact cloud, orientation from real EE)"]
-        SCALE["Scale-up (Genesis physics + reslice + render)<br/>US image · pose · contact force · anatomy mask"]
+
+        subgraph RENDER["Learned renderer (CUT): CBCT slice → US"]
+            direction TB
+            TRAIN["train paired + unpaired"]
+            REVAL["eval vs real US (SSIM/realism/speckle)<br/>→ paired wins 6/0 → paired generator.pt"]
+            TRAIN --> REVAL
+        end
+
+        subgraph TRAJq["Novel trajectory + render + quality"]
+            direction TB
+            TILT["novel poses by probe TILT/fan<br/>(in-volume, in-distribution; not translation)"]
+            REND2["reslice CBCT → paired-CUT → pseudo-US"]
+            QUAL["GT-free quality: realism · input-in-dist · artifacts<br/>⚠ bottleneck: far-field bright-band artifact"]
+            TILT --> REND2 --> QUAL
+        end
+
+        SCALE["Scale-up dataset (Genesis physics + reslice + render)<br/>US image · pose · contact force · anatomy mask"]
     end
 
     subgraph STAGE2["Stage 2 · sim-to-real — answer the research question"]
@@ -49,17 +63,21 @@ flowchart TB
 
     CBCT -->|3D Slicer| ASSETS
     USREAL -. registration .-> LC2
-    USREAL -. render supervision .-> REND
-    USREAL -. orientation .-> TRAJ
+    USREAL -. render supervision .-> TRAIN
+    USREAL -. orientation .-> TILT
     PROBE --> SCALE
-    ASSETS --> CHAIN --> LC2 --> REND --> SCALE
-    ASSETS --> TRAJ --> SCALE
+    ASSETS --> CHAIN --> LC2 --> TRAIN
+    REVAL --> REND2
+    REVAL --> SCALE
+    ASSETS --> TILT
+    TILT --> SCALE
+    QUAL --> SCALE
     SCALE --> ENC --> SEG --> NAV
 
     classDef s1 fill:#e6f4f1,stroke:#2a9d8f,color:#14323b;
     classDef s2 fill:#e7eefc,stroke:#3a6ea5,color:#16233f;
     classDef inp fill:#fff3e0,stroke:#e07a1f,color:#5a3a00;
-    class ASSETS,CHAIN,LC2,REND,TRAJ,SCALE s1;
+    class ASSETS,CHAIN,LC2,TRAIN,REVAL,TILT,REND2,QUAL,SCALE s1;
     class ENC,SEG,NAV s2;
     class CBCT,USREAL,PROBE inp;
 ```
@@ -144,6 +162,40 @@ generates a trajectory from the mesh (`raster` / `surface-curves` / `contact`) a
 `.npz`; [`plot_script/plots_reslice/trajectories.py`](plot_script/plots_reslice/trajectories.py)
 draws it (`--trajectory-file`, 3D + top view, belly-up world frame) or overlays the recorded
 sequences' coverage.
+
+### Renderer choice, novel-trajectory data & GT-free quality
+
+The renderer-data workflow lives in [`renderer_training/`](renderer_training/) plus the figure
+scripts under [`plot_script/`](plot_script/); every figure is catalogued in
+[`figures/README.md`](figures/README.md), numbered by pipeline stage (1–8).
+
+- **Paired vs unpaired renderer — paired wins.** Both CUT variants are trained from the LC2 pairs
+  (`train_cut_{paired,unpaired}.py`); [`renderer_eval.py`](renderer_training/renderer_eval.py) scores
+  them on the LC2-paired real frames (the only frames with per-frame ground truth) using fidelity
+  (SSIM/PSNR/L1) **and** alignment-free realism (intensity-histogram + Nakagami-speckle Wasserstein,
+  texture-Fréchet). **Paired wins 6/0** — including on the realism metrics that are unpaired's own
+  objective, so it is not just memorising the L1. `render_us_from_poses.py` defaults to the paired
+  `generator.pt`.
+- **Novel trajectories come from probe *tilt*, not translation.** The CBCT volume is small and the
+  rosbag already swept most of the in-volume surface, so any *translation* large enough to be novel
+  pushes the fan out of the volume (unrenderable). Novelty is taken from **orientation** instead:
+  [`generate_tilt_trajectories.py`](renderer_training/generate_tilt_trajectories.py) rocks/fans the
+  probe about its own axes on the real scan lines and clips each pose to `fraction_inside ≥ 0.9`. The
+  beam cuts new anatomy (mean beam novelty **27°**, content novelty **0.55** = 1−NCC vs nearest real
+  slice) while staying renderable (min in-volume **0.91**) and in-distribution (orientation = a real
+  pose ± bounded tilt). Plotted by [`tilt_novelty.py`](plot_script/plots_reslice/tilt_novelty.py).
+- **GT-free quality of the generated US.** Novel poses have no paired real US, so
+  [`novel_render_eval.py`](renderer_training/novel_render_eval.py) evaluates without ground truth:
+  (A) realism vs the real US *set* (texture-Fréchet **0.85×** the real-vs-real floor, speckle 1.4×),
+  (B) **input in-distribution** — 98% of novel CBCT slices fall inside the training-CBCT manifold, so
+  the *trajectory* is sound, and (D) artifact prevalence.
+- ⚠️ **Current bottleneck — the renderer's far-field artifact.** ~30% of novel frames carry the paired
+  renderer's deep-field bright-band artifact (a bright arc real US does not produce), which also skews
+  the overall brightness distribution (histogram Wasserstein 3.7× floor). The trajectory is *not* the
+  problem (input is 98% in-distribution). Fix: a far-field brightness regulariser / post-hoc
+  suppression on the renderer, or cropping the deepest ~15% of the fan, then re-render. Tilt-specific
+  *appearance* correctness still awaits real tilted US (see "Multi-angle data" in Status) — the GT-free
+  metrics confirm realism and input-regime, not tilt-specific echo physics.
 
 ### Design invariants
 
@@ -380,6 +432,74 @@ python scripts/gen_trajectory.py --mesh data/cbct_20260612/phantom_surface.stl -
 python -m plot_script.plots_reslice.trajectories --trajectory-file data/trajectories/raster.npz  # draw it
 ```
 
+### Renderer-data workflow (renderer_training/) — train → eval → novel poses → render → quality
+
+This is the learned-renderer sub-pipeline (CUT renderer + the novel-tilt trajectory data and its
+quality checks). All scripts run inside the Apptainer image; prefix each with the runner. On the
+cluster:
+
+```bash
+export DEEPUSSIM_SIF=$WORK/deepussim.sif          # built by apptainer/build.sh
+RUN="apptainer/run.sh"                             # = apptainer run --nv + repo binds
+# steps 3–7 are CPU-only (add --device cpu); step 2 (training) needs a GPU node (sbatch).
+```
+
+Steps (each writes into the numbered `figures/` folders and `data/`):
+
+**1 · LC2 → renderer pairs.** Build the `{CBCT slice ↔ real US}` training set from the LC2 poses:
+
+```bash
+$RUN python renderer_training/pair_generation.py --out data/renderer_lc2_pairs   # → pairs.npz (150 frames)
+```
+
+**2 · Train both renderers** (GPU; submit as batch jobs). Paired adds a weak supervised L1
+(`--lambda-pair`); unpaired is the CUT baseline:
+
+```bash
+EPOCHS=300 sbatch renderer_training/slurm/train_cut_paired.sh      # → runs/renderer_cut_paired_display_ep300_b2_lp005/generator.pt
+EPOCHS=300 sbatch renderer_training/slurm/train_cut_unpaired.sh    # → runs/renderer_cut_unpaired_display_ep300_b2/generator.pt
+# or directly:  $RUN python renderer_training/train_cut_paired.py --out runs/<name> --epochs 300 --batch 2 --lambda-pair 0.05
+```
+
+**3 · Pick the renderer (paired vs unpaired).** Scores both on the LC2-paired real frames; paired
+wins 6/0:
+
+```bash
+$RUN python renderer_training/renderer_eval.py --device cpu
+# → figures/6_renderer_eval_paired_vs_unpaired/renderer_eval_comparison.png
+#   data/renderer_eval/renderer_eval_{summary.json,metrics.csv}
+```
+
+**4 · Generate novel trajectories by probe tilt** (novel + in-volume + in-distribution):
+
+```bash
+$RUN python renderer_training/generate_tilt_trajectories.py \
+    --out data/trajectories/novel_tilt_valid.npz \
+    --lat-tilts-deg -24 -16 -8 8 16 24 --elev-tilts-deg -12 0 12 \
+    --per-line 16 --n-trajectories 16 --min-inside 0.9
+$RUN python -m plot_script.plots_reslice.tilt_novelty            # → figures/4_novel_trajectory_tilt/
+```
+
+**5 · Render pseudo-US** from the novel poses with the paired renderer (slice CBCT → CUT):
+
+```bash
+$RUN python renderer_training/render_us_from_poses.py \
+    --trajectory data/trajectories/novel_tilt_valid.npz \
+    --checkpoint runs/renderer_cut_paired_display_ep300_b2_lp005/generator.pt \
+    --out data/rendered_us/novel_tilt_paired --device cpu
+$RUN python -m plot_script.plots_renderer.rendered_us_gallery    # → figures/7_rendered_us_from_novel_tilt/ (all 243 frames)
+```
+
+**6 · GT-free quality of the generated US** (realism vs real set, input-in-distribution, artifacts):
+
+```bash
+$RUN python renderer_training/novel_render_eval.py
+# → figures/8_novel_render_quality/novel_render_quality.png
+#   data/novel_render_eval/novel_render_summary.json
+```
+
+All resulting figures are catalogued in [`figures/README.md`](figures/README.md).
+
 ## Status
 
 Stage 1 is **end-to-end and produces aligned (US image + pose + anatomy mask + contact force)
@@ -421,11 +541,26 @@ down-press regime.
   hallucination of the main structure); FID is a relative yardstick (Inception-on-US).
   Pipeline: `scripts/{prep_renderer_data,train_renderer,eval_renderer}.py` +
   `scripts/slurm/renderer_{train,eval}.slurm`; fine-tune new data with `--resume`.
+- **Paired vs unpaired renderer — paired chosen.** `renderer_training/renderer_eval.py` scores both
+  CUT variants on the 150 LC2-paired real frames; **paired wins 6/0** across fidelity (SSIM/PSNR/L1)
+  and alignment-free realism (histogram + Nakagami Wasserstein, texture-Fréchet). `render_us_from_poses.py`
+  defaults to the paired generator (`figures/6_renderer_eval_paired_vs_unpaired/`).
+- **Novel-trajectory data by tilt + GT-free quality.** `generate_tilt_trajectories.py` produces novel
+  poses from probe *tilt* (mean beam novelty 27°, content novelty 0.55) that stay renderable
+  (min in-volume 0.91) and in-distribution; `novel_render_eval.py` confirms the rendered pseudo-US is
+  realistic (texture-Fréchet 0.85× the real-vs-real floor) and that **98% of novel CBCT inputs are
+  inside the training manifold** (the trajectory is sound). Figures: `figures/{4,7,8}_*`.
 - **LC2 registration** — image-based `lc2_similarity` + constrained 6-DoF `register_frame_lc2`,
   initialised from the seated placement. (Absolute LC2 stays low on this low-texture phantom — it
   is *not* a reliable arbiter; see the placement note above.)
 
 **Pending (Stage 1).**
+- **Renderer far-field artifact (current quality bottleneck)** — the paired CUT renderer produces a
+  deep-field bright-band artifact in ~30% of novel frames (real US has none), which also skews the
+  brightness distribution (histogram Wasserstein 3.7× the real-vs-real floor). It is a *renderer*
+  property, not the trajectory (novel inputs are 98% in-distribution). Fix: far-field brightness
+  regulariser / post-hoc suppression, or crop the deepest ~15% of the fan, then re-render and re-run
+  `novel_render_eval.py`. See `figures/8_novel_render_quality/`.
 - **Multi-angle data (the main remaining piece)** — the renderer and trajectory are validated only
   for the single down-press regime (the two sequences span <0.6° of orientation). Tilt-diverse real
   US (next collection: ±25° fan/rock + fiducials) → fine-tune (`--resume`) unlocks multi-angle
