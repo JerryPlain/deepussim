@@ -107,61 +107,30 @@ gross error and aligns the surface, but saturates before mm precision (see Statu
 
 ### Trajectory generation
 
-The probe glides *along* the phantom surface, so a pose needs a surface **position** and an
-**orientation**. The key finding: measured against the real poses, the probe presses **straight
-down** (its axial varies <0.6° over a whole sweep) and does **not** follow the local surface
-normal — so orientation is taken from the **real EE poses**, not from mesh normals. Two reliable
-trajectories ([`pipeline/sampling.py`](src/deepussim/pipeline/sampling.py), the `--trajectory` flag
-of [`run_scaleup.py`](scripts/run_scaleup.py)):
+A pose needs a surface **position** and an **orientation**. Key finding: measured against the real
+poses, the probe presses **straight down** (axial varies <0.6° over a sweep) and does **not** follow
+the surface normal — so orientation is borrowed from the **real EE poses**, never from mesh normals
+(the mesh-normal samplers `surface_sweep`/`surface_raster` are deprecated for that reason; the
+"non-watertight mesh" diagnosis was a red herring). Sim trajectories
+([`pipeline/sampling.py`](src/deepussim/pipeline/sampling.py), `run_scaleup.py --trajectory`):
 
-- **`replay`** — drive the arm along the real rosbag EE poses (subsampled). Reachable and
-  on-surface by construction; the faithful reference, but it produces no new viewpoints.
-- **`contact_raster_ee`** (`--trajectory contact`) — densify within the real scanned region:
-  **position** from a serpentine raster over the real contact-point cloud's fitted plane,
-  **orientation** borrowed from the nearest real EE pose. The surface mesh is used only to project
-  each guide onto the surface and set the standoff — never for orientation.
-- **`surface_curves_from_points`** (`--trajectory surface-curves`) — *leave* the scanned footprint:
-  drape smooth curves through surface points anywhere on the phantom — including the lateral sides a
-  real probe can't reach (sim's exclusive advantage) — still borrowing the real **down-press**
-  orientation. This pushes the cheap **position** axis while staying in-regime on the expensive
-  **orientation** axis (`contact_raster_ee` is bounded by `half_u/half_v` = the real footprint, so
-  it scales up volume but not *coverage*). `side_anchor_curves` auto-seeds the curves; or pass your
-  own hand-picked anchors. Each pose is tagged by `pose_surface_deviation` (**surface-turn** vs the
-  patch, *not* axial-vs-normal — the real press is itself ~50° off the surface normal, so it scores
-  the trusted real poses as Tier A by construction): **Tier A** (≤ `--tier-b-deg`, surface oriented
-  like the patch → renderer-trusted) vs **Tier B** (lateral frontier → tag/quarantine, or drop with
-  `--max-dev-deg`). Tier B is *also* the map of where the next real collection should go.
+- **`replay`** — drive the arm along the real rosbag EE poses; faithful reference, no new viewpoints.
+- **`contact_raster_ee`** (`contact`) — densify the scanned patch: serpentine raster over the real
+  contact cloud, orientation from the nearest real EE pose.
+- **`surface_curves_from_points`** (`surface-curves`) — leave the footprint onto the lateral sides a
+  real probe can't reach, still borrowing the down-press orientation.
 
-The resulting pose stream (`T_cbct_from_probe`, mm) is used **twice from one source** — fed
-directly to reslice the volume, *and* mapped through the seated placement
-(`calib.seat_phantom_placement`, the inverse of the reslice bridge) into the sim world to drive
-the arm and press the Genesis probe into contact. Because the arm path and the reslice plane
-come from the *same* poses, "where the probe is" and "which slice we image" are aligned by
-construction — the same property that makes the anatomy masks free.
+The pose stream (`T_cbct_from_probe`, mm) drives **both** the reslice and (via
+`calib.seat_phantom_placement`) the Genesis arm, so "where the probe is" and "which slice we image"
+are aligned by construction — which is what makes the anatomy masks free. Split tooling:
+[`scripts/gen_trajectory.py`](scripts/gen_trajectory.py) generates + saves a `.npz`;
+[`plot_script/plots_reslice/trajectories.py`](plot_script/plots_reslice/trajectories.py) draws it.
 
-> ⚠️ **Two axes of "regime", not one.** *Orientation* (down-press ↔ tilted) was only supervised at
-> the single down-press, so tilting is real extrapolation — **only new collection** extends it.
-> *Position* (the scanned patch ↔ elsewhere on the surface) is the cheap axis: at the trusted
-> orientation, new surface locations are a milder extrapolation, and the hard-to-reach ones are
-> sim's **exclusive** advantage (real collection can't reach them either). `replay` /
-> `contact_raster_ee` move on *neither* axis (they densify the footprint); `surface-curves` pushes
-> *position* while holding *orientation* — its **Tier B** poses are where position has drifted far
-> enough that the contact geometry no longer resembles training (validate before trusting). The
-> mesh-normal samplers `surface_sweep` / `surface_raster` stay **deprecated** (they orient from mesh
-> normals, which the real probe does not follow — the "non-watertight mesh" diagnosis was a **red
-> herring**; the same unreliable normal sign is why Tier tagging measures surface-*turn*, not
-> axial-vs-normal). Multi-angle coverage still needs orientation-diverse real US; then
-> `contact_raster_ee` and `surface-curves` inherit the tilts automatically. See
-> [`docs/data_collection.md`](docs/data_collection.md).
-
-A generated trajectory is **deterministic** from (mesh + params), so it need not be stored — the
-achieved poses are written into the dataset anyway; `--save-trajectory <path.npz>` optionally
-dumps it (`T_cbct_from_probe`, mm) for inspection or to reuse the identical poses across runs.
-Generation and plotting are split: [`scripts/gen_trajectory.py`](scripts/gen_trajectory.py)
-generates a trajectory from the mesh (`raster` / `surface-curves` / `contact`) and saves it to a
-`.npz`; [`plot_script/plots_reslice/trajectories.py`](plot_script/plots_reslice/trajectories.py)
-draws it (`--trajectory-file`, 3D + top view, belly-up world frame) or overlays the recorded
-sequences' coverage.
+> ⚠️ **Two axes of regime.** *Orientation* (down-press ↔ tilted) was supervised only at the single
+> down-press → tilting is extrapolation that needs new real collection. *Position* (scanned patch ↔
+> elsewhere) is the cheap axis. For the **renderer-data** path this is revisited below: novelty is
+> taken from probe *tilt* but the renderer's *input* (the CBCT slice) stays in-distribution, so it
+> renders — while tilt-specific echo *appearance* still awaits real tilted US.
 
 ### Renderer choice, novel-trajectory data & GT-free quality
 
@@ -217,25 +186,9 @@ scripts under [`plot_script/`](plot_script/); every figure is catalogued in
   `contact = 0` (negatives for the dataset, lift-off supervision for the renderer) rather than
   silently discarded.
 
-> **Resolved by replay (probe mount + placement direction).** Driving the probe along the real
-> rosbag poses and measuring its distance to the phantom surface picks the calibration
-> unambiguously ([`scripts/verify_replay.py`](scripts/verify_replay.py)): the mount is
-> `T_EE_FROM_PROBE` (the delivered hand-eye matrix `T_PROBE_FROM_EE` is its inverse), and the
-> measured robot↔phantom matrix is used as CBCT→world (`T_WORLD_FROM_CBCT`). Under it, contact
-> frames land ~1–3 cm from the surface while non-contact ("dark") frames sit 13–21 cm off
-> (lift-off) — a two-sided check of the whole chain on both sequences.
-
-> **Resolved: the CBCT-frame orientation (belly-up).** That matrix fixes the probe *position* but
-> is expressed in the CBCT scan/optical frame `{c}`, rolled from the DICOM-LPS frame of our
-> exported `intensity.nrrd` — applied raw it stands the phantom on end. The real rig has it
-> *lying* **belly-up**: the probe presses straight down onto the up-facing anterior surface (the
-> real EE axial is world `-z`) and images into the body. The lie-down that reproduces this is
-> `Rx(90°)·Rz(180°)` about the phantom centre (`Rx` tips it off-end, `Rz` flips it belly-up),
-> centralised in `calib.seat_phantom_placement`. Validated in sim: **14/14 real poses reachable
-> pressing from above, fan 82% inside tissue**, vs the earlier belly-down `Rx(90°)` alone that
-> imaged out of the body (~10%). **LC2 is not the arbiter here** — the low-texture body makes it
-> *prefer* the wrong belly-down graze, so the physical prior + in-tissue geometry decide the
-> orientation. (Superseded the belly-down placement of commit `2769501`; see CHANGELOG 2026-06-04.)
+> The probe mount (`T_EE_FROM_PROBE`) and the belly-up placement (`Rx90·Rz180`,
+> `calib.seat_phantom_placement`) were both resolved by replay + in-tissue geometry, not LC2 — see
+> [`scripts/verify_replay.py`](scripts/verify_replay.py) and the CHANGELOG (2026-06-04).
 
 ## Layout
 
@@ -389,12 +342,12 @@ python scripts/fit_us_geometry.py --seq data/sequences/phantom.npz data/sequence
 **4 · Generate the geometry/force channels** — reslice the CBCT along probe poses, render a
 US-like image, and read anatomy masks free from the label volume.
 
-  *4a · no-sim* (geometric poses, CPU) — surface-constrained sweep over the phantom:
+  *4a · no-sim* (geometric poses, CPU) — EE-oriented raster over the scanned patch:
 
 ```bash
 python scripts/run_scaleup.py --volume data/cbct_20260612/intensity.nrrd \
     --labels data/cbct_20260612/labels.nrrd --mesh data/cbct_20260612/phantom_surface.stl \
-    --trajectory surface --config configs/renderer.yaml --out data/ds --n 64
+    --trajectory contact --config configs/renderer.yaml --out data/ds --n 64
 ```
 
   *4b · sim force channel* (GPU) — the FR3 follows the **real `replay`** trajectory onto the
@@ -408,10 +361,8 @@ python scripts/run_scaleup.py --volume data/cbct_20260612/intensity.nrrd \
 # drop --headless to watch live in the Genesis viewer; --force-n / --contact-timeconst tune the contact
 ```
 
-  `--trajectory raster`/`surface`/`contact` drive a *generated* trajectory instead, but on this
-  phantom they mis-orient (the mesh is not watertight — see the Trajectory-generation note); use
-  `replay` until that is fixed.
-```
+  `--trajectory contact`/`surface-curves` drive a *generated* trajectory instead (EE-borrowed
+  orientation; see Trajectory generation).
 
 **5 · LC2 registration** (`{US ↔ CBCT slice}` pairs) — refine each real frame's calibration
 pose against the CBCT by image content. Now the self-contained `lc2/` package on top of the
@@ -529,22 +480,11 @@ down-press regime.
   each achieved pose into the CBCT frame, and reslices to (US image + anatomy mask + contact
   force). A write gate keeps only poses that **reached their target and made contact** (contact
   alone is a false positive); off-anatomy / empty slices are dropped.
-- **Trajectory orientation** — generated poses take their orientation from the **real EE poses**
-  (`contact_raster_ee`), not the mesh normals. Measured against the real poses, the probe presses
-  straight **down** (axial spread <0.6°) and does *not* follow the surface normal, so mesh-normal
-  orientation was wrong and watertightness a red herring; `contact`/`replay` are the reliable
-  trajectories.
-- **Learned renderer (B1)** — a CUT generator (`renderer/`, pure-torch) maps CBCT slice → US,
-  trained against real US with an adversarial + PatchNCE (unpaired) objective, and wrapped as
-  `NeuralRenderer` so `generate_dataset(renderer=…)` writes realistic US (the physics model stays
-  as a baseline). Evaluated (`eval_renderer.py`): the surface is preserved to **~0.9 mm** (no
-  hallucination of the main structure); FID is a relative yardstick (Inception-on-US).
-  Pipeline: `scripts/{prep_renderer_data,train_renderer,eval_renderer}.py` +
-  `scripts/slurm/renderer_{train,eval}.slurm`; fine-tune new data with `--resume`.
-- **Paired vs unpaired renderer — paired chosen.** `renderer_training/renderer_eval.py` scores both
-  CUT variants on the 150 LC2-paired real frames; **paired wins 6/0** across fidelity (SSIM/PSNR/L1)
-  and alignment-free realism (histogram + Nakagami Wasserstein, texture-Fréchet). `render_us_from_poses.py`
-  defaults to the paired generator (`figures/6_renderer_eval_paired_vs_unpaired/`).
+- **Learned renderer (B1) — paired chosen.** A pure-torch CUT generator (`renderer/`) maps CBCT
+  slice → US, wrapped as `NeuralRenderer` so scale-up writes realistic US. Both paired and unpaired
+  variants are trained from the LC2 pairs; `renderer_training/renderer_eval.py` scores them on the 150
+  LC2-paired real frames and **paired wins 6/0** (fidelity + alignment-free realism), so
+  `render_us_from_poses.py` defaults to the paired generator (`figures/6_*`).
 - **Novel-trajectory data by tilt + GT-free quality.** `generate_tilt_trajectories.py` produces novel
   poses from probe *tilt* (mean beam novelty 27°, content novelty 0.55) that stay renderable
   (min in-volume 0.91) and in-distribution; `novel_render_eval.py` confirms the rendered pseudo-US is
@@ -568,8 +508,6 @@ down-press regime.
 - **Strict renderer validation** — FID + structure/surface metrics exist, but a real
   structure-consistency stress test needs the geometric variety (and fiducials) the next collection
   provides; FID is only a relative yardstick on this Inception-on-US setup.
-- **`surface_*` samplers** — `surface_sweep`/`surface_raster` still orient from mesh normals (a
-  latent issue if used); `contact`/`replay` are the live, reliable paths.
 - **LC2 accuracy / placement** — LC2 removes the gross error but **saturates before mm precision
   on this low-texture phantom**, and the refinement is bound-limited (the placement still carries
   a ~cm offset, seated on the contact cloud rather than from fiducials). Tighten the seat (along
