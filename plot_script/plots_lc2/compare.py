@@ -32,7 +32,7 @@ DEFAULT_REPORT = _REPO_ROOT / "reslice" / "outputs" / "frame_origin000" / "physi
 DEFAULT_VOLUME = _REPO_ROOT / "data" / "cbct_20260612" / "CBCT.mhd"
 DEFAULT_PLACEMENT = _REPO_ROOT / "reslice" / "outputs" / "world_from_phantom_liedown.txt"
 DEFAULT_REF_SEQUENCE = _REPO_ROOT / "data" / "sequences" / "scan1.npz"   # fan fitted from here
-DEFAULT_OUT_DIR = _REPO_ROOT / "figures" / "lc2_compare"
+DEFAULT_OUT_DIR = _REPO_ROOT / "figures" / "1_lc2_pose_registration"
 US_SPACING = 0.166112957
 
 

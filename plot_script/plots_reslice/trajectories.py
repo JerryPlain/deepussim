@@ -33,7 +33,18 @@ from reslice.io import load_transform_4x4
 DEFAULT_SEQ_DIR = _REPO_ROOT / "data" / "sequences"
 DEFAULT_MESH = _REPO_ROOT / "data" / "cbct_20260612" / "phantom_surface.stl"
 DEFAULT_PLACEMENT = _REPO_ROOT / "reslice" / "outputs" / "world_from_phantom_liedown.txt"
-DEFAULT_OUT = _REPO_ROOT / "figures" / "reslice" / "all_trajectories.png"
+DEFAULT_OUT = _REPO_ROOT / "figures" / "3_trajectory_coverage" / "all_trajectories.png"
+
+
+
+
+def load_world_from_phantom(path: Path) -> np.ndarray:
+    """Load belly-up T_world_from_phantom, falling back to the calibrated reslice default."""
+    if Path(path).exists():
+        return load_transform_4x4(Path(path))
+    from reslice.pose import default_world_from_phantom_centered_m
+
+    return default_world_from_phantom_centered_m()
 
 
 def contact_positions(sequence: Path, T_world_from_phantom: np.ndarray, frame: str) -> np.ndarray:
@@ -81,7 +92,7 @@ def plot_overlay(sequences, mesh_path, placement, frame: str, out: Path) -> Path
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    T_world_from_phantom = load_transform_4x4(Path(placement))
+    T_world_from_phantom = load_world_from_phantom(Path(placement))
     backdrop = phantom_backdrop(Path(mesh_path), T_world_from_phantom, frame)
     colors = plt.cm.tab20(np.linspace(0, 1, max(len(sequences), 1)))
     u = _units(frame)
@@ -121,7 +132,7 @@ def plot_grid(sequences, mesh_path, placement, frame: str, out: Path) -> Path:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    T_world_from_phantom = load_transform_4x4(Path(placement))
+    T_world_from_phantom = load_world_from_phantom(Path(placement))
     backdrop = phantom_backdrop(Path(mesh_path), T_world_from_phantom, frame)
     u = _units(frame)
     ncol = 5
@@ -163,7 +174,7 @@ def plot_trajectory_file(traj_npz, mesh_path, placement, frame: str, out: Path) 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    T_world_from_phantom = load_transform_4x4(Path(placement))
+    T_world_from_phantom = load_world_from_phantom(Path(placement)) if frame == "world" else np.eye(4)
     poses = np.asarray(np.load(traj_npz)["poses_cbct_mm"], dtype=float)
     P, A = _poses_to_frame(poses, T_world_from_phantom, frame)
     backdrop = phantom_backdrop(Path(mesh_path), T_world_from_phantom, frame)
@@ -199,6 +210,75 @@ def plot_trajectory_file(traj_npz, mesh_path, placement, frame: str, out: Path) 
     return out
 
 
+def plot_novel_vs_existing(traj_npz, lc2_dir, mesh_path, placement, frame: str, out: Path) -> Path:
+    """Overlay real rosbag/LC2 poses (grey) with generated poses (coloured by distance to the
+    nearest real pose), plus a histogram of that distance. Makes novelty visible and quantified."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    from renderer_training.analyze_pose_coverage import load_lc2_poses
+
+    T_world_from_phantom = load_world_from_phantom(Path(placement)) if frame == "world" else np.eye(4)
+    existing_poses, _ = load_lc2_poses(Path(lc2_dir), ["scan*_global.npz"])
+    data = np.load(traj_npz)
+    novel_poses = np.asarray(data["poses_cbct_mm"], dtype=float)
+    # The generators store nearest-existing distance (mm); recompute as a fallback for older files.
+    if "nearest_existing_mm" in data.files:
+        nearest_mm = np.asarray(data["nearest_existing_mm"], dtype=float)
+    else:
+        from scipy.spatial import cKDTree
+        nearest_mm, _ = cKDTree(existing_poses[:, :3, 3]).query(novel_poses[:, :3, 3])
+
+    Pe, _ = _poses_to_frame(existing_poses, T_world_from_phantom, frame)
+    Pn, An = _poses_to_frame(novel_poses, T_world_from_phantom, frame)
+    backdrop = phantom_backdrop(Path(mesh_path), T_world_from_phantom, frame)
+    u = _units(frame)
+    arrow = 0.012 if frame == "world" else 12.0
+
+    fig = plt.figure(figsize=(18, 6))
+    ax3d = fig.add_subplot(131, projection="3d")
+    axtop = fig.add_subplot(132)
+    axhist = fig.add_subplot(133)
+
+    for ax in (ax3d, axtop):
+        bd = backdrop.T if ax is ax3d else (backdrop[:, 0], backdrop[:, 1])
+        ax.scatter(*bd, s=1, c="0.88", alpha=0.25)
+    # Real poses: neutral grey reference of where we already scanned.
+    ax3d.scatter(Pe[:, 0], Pe[:, 1], Pe[:, 2], s=6, c="0.55", alpha=0.5, label=f"real ({len(Pe)})")
+    axtop.scatter(Pe[:, 0], Pe[:, 1], s=6, c="0.55", alpha=0.5, label=f"real ({len(Pe)})")
+    # Novel poses coloured by how far they sit from the nearest real pose (the novelty metric).
+    sc = ax3d.scatter(Pn[:, 0], Pn[:, 1], Pn[:, 2], c=nearest_mm, cmap="plasma", s=14, depthshade=False)
+    step = max(1, len(Pn) // 16)
+    ax3d.quiver(Pn[::step, 0], Pn[::step, 1], Pn[::step, 2], An[::step, 0], An[::step, 1], An[::step, 2],
+                length=arrow, color="#b91c1c", linewidth=0.6, arrow_length_ratio=0.4, alpha=0.7)
+    axtop.scatter(Pn[:, 0], Pn[:, 1], c=nearest_mm, cmap="plasma", s=14)
+
+    ax3d.set_title(f"real (grey) vs generated (coloured), 3D")
+    ax3d.set_xlabel(f"x ({u})"); ax3d.set_ylabel(f"y ({u})"); ax3d.set_zlabel(f"z ({u})")
+    ax3d.view_init(elev=22, azim=-60); ax3d.legend(loc="upper left", fontsize=8)
+    axtop.set_title(f"top view (x-y, {u})"); axtop.set_aspect("equal")
+    axtop.set_xlabel(f"x ({u})"); axtop.set_ylabel(f"y ({u})"); axtop.legend(loc="upper left", fontsize=8)
+    fig.colorbar(sc, ax=axtop, label="dist. to nearest real pose (mm)", fraction=0.046, pad=0.04)
+
+    axhist.hist(nearest_mm, bins=30, color="#7c3aed", alpha=0.85)
+    axhist.axvline(float(np.median(nearest_mm)), color="#b91c1c", lw=1.5,
+                   label=f"median {np.median(nearest_mm):.1f} mm")
+    axhist.set_title("novelty = distance to nearest real pose")
+    axhist.set_xlabel("distance (mm)"); axhist.set_ylabel("generated poses"); axhist.legend(fontsize=8)
+
+    fig.suptitle(
+        f"{Path(traj_npz).stem}: {len(Pn)} generated vs {len(Pe)} real poses  "
+        f"(mean gap {nearest_mm.mean():.1f} mm, median {np.median(nearest_mm):.1f} mm)",
+        fontsize=12,
+    )
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
+    out = Path(out); out.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out, dpi=130)
+    plt.close(fig)
+    return out
+
+
 def main() -> None:
     import argparse
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -206,6 +286,9 @@ def main() -> None:
                     help="sequence .npz files (default: data/sequences/scan*.npz, natural order)")
     ap.add_argument("--trajectory-file", type=Path,
                     help="draw a generated/saved trajectory (.npz, key poses_cbct_mm) instead of sequences")
+    ap.add_argument("--compare-existing", action="store_true",
+                    help="with --trajectory-file: overlay real LC2 poses + novelty histogram")
+    ap.add_argument("--lc2-dir", type=Path, default=_REPO_ROOT / "data" / "lc2")
     ap.add_argument("--mesh", type=Path, default=DEFAULT_MESH)
     ap.add_argument("--placement", type=Path, default=DEFAULT_PLACEMENT)
     ap.add_argument("--frame", choices=("world", "cbct"), default="world",
@@ -215,6 +298,10 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.trajectory_file:
+        if args.compare_existing:
+            out = args.out or DEFAULT_OUT.with_name(f"{Path(args.trajectory_file).stem}_vs_existing.png")
+            print(f"wrote {plot_novel_vs_existing(args.trajectory_file, args.lc2_dir, args.mesh, args.placement, args.frame, out)}")
+            return
         out = args.out or DEFAULT_OUT.with_name(f"{Path(args.trajectory_file).stem}.png")
         print(f"wrote {plot_trajectory_file(args.trajectory_file, args.mesh, args.placement, args.frame, out)}")
         return

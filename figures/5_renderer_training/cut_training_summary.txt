@@ -1,0 +1,14 @@
+CUT renderer training summary
+
+paired   total    first50_mean=6.7505 last50_mean=6.3467 improve=+6.0% best=ep40:6.1755 last_slope/ep=-0.00415
+paired   nce      first50_mean=3.9772 last50_mean=3.6313 improve=+8.7% best=ep300:3.5469 last_slope/ep=-0.00201
+paired   nce_idt  first50_mean=2.1035 last50_mean=1.7225 improve=+18.1% best=ep288:1.6423 last_slope/ep=-0.00182
+paired   pair_raw first50_mean=0.1695 last50_mean=0.1150 improve=+32.1% best=ep286:0.0965 last_slope/ep=-0.00017
+unpaired total    first50_mean=6.9777 last50_mean=6.3906 improve=+8.4% best=ep124:6.1205 last_slope/ep=-0.00064
+unpaired nce      first50_mean=3.9833 last50_mean=3.6470 improve=+8.4% best=ep228:3.5230 last_slope/ep=-0.00074
+unpaired nce_idt  first50_mean=2.1942 last50_mean=1.7630 improve=+19.7% best=ep212:1.7085 last_slope/ep=+0.00023
+
+Interpretation:
+- 300 epochs finished for both runs.
+- Losses still improve over the final-vs-initial tail window, but GAN losses oscillate.
+- Per-scan visuals are under this output directory: pairs, unpaired, and paired.

@@ -26,7 +26,7 @@ from reslice.sampling import reslice_rectangular_plane
 DEFAULT_REPORT = _REPO_ROOT / "reslice" / "outputs" / "frame_origin000" / "physical_frame_report.json"
 DEFAULT_VOLUME = _REPO_ROOT / "data" / "cbct_20260612" / "CBCT.mhd"
 DEFAULT_PLACEMENT = _REPO_ROOT / "reslice" / "outputs" / "world_from_phantom_liedown.txt"
-DEFAULT_OUT_DIR = _REPO_ROOT / "figures" / "reslice"
+DEFAULT_OUT_DIR = _REPO_ROOT / "figures" / "2_cbct_us_reslice_check"
 
 # Fan fitted from the real US (fit_us_geometry on scan1).
 FAN = dict(depth_mm=93.0, fov_deg=57.0, near_mm=15.0)
