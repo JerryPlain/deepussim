@@ -288,8 +288,13 @@ def crop_and_zoom_sector(
     crop_mask: np.ndarray,
     target_shape: tuple[int, int],
     margin_px: int,
+    order: int = 1,
 ) -> tuple[np.ndarray, dict]:
-    """Crop to the fan bounding box (+margin) and resize to ``target_shape`` (US size)."""
+    """Crop to the fan bounding box (+margin) and resize to ``target_shape`` (US size).
+
+    ``order=1`` (bilinear) for an intensity sector, ``order=0`` (nearest) for a label
+    sector so class ids are never blended by the resize.
+    """
     hits = np.argwhere(crop_mask)
     if hits.size == 0:
         return np.zeros(target_shape, dtype=np.float32), {
@@ -309,7 +314,7 @@ def crop_and_zoom_sector(
         float(target_shape[0]) / max(crop.shape[0], 1),
         float(target_shape[1]) / max(crop.shape[1], 1),
     )
-    zoomed = ndimage.zoom(crop, zoom, order=1)[: target_shape[0], : target_shape[1]]
+    zoomed = ndimage.zoom(crop, zoom, order=order)[: target_shape[0], : target_shape[1]]
     if zoomed.shape != target_shape:
         out = np.zeros(target_shape, dtype=np.float32)
         out[: zoomed.shape[0], : zoomed.shape[1]] = zoomed

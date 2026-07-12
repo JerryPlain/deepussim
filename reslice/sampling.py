@@ -22,12 +22,14 @@ def reslice_rectangular_plane(
     n_cols: int,
     axial_sign: float,
     lateral_sign: float,
+    order: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Sample a ``width_mm x height_mm`` plane into an ``(n_rows, n_cols)`` image.
 
     ``axial_sign`` / ``lateral_sign`` flip the in-plane axes to match the display
     convention. Returns ``(image, valid_mask)`` where ``valid_mask`` marks pixels that
-    fell inside the volume bounds.
+    fell inside the volume bounds. Use ``order=1`` (trilinear) for an intensity volume
+    and ``order=0`` (nearest) for a label volume so class ids are never blended.
     """
     # Metric grid on the plane: columns span lateral, rows span axial (with the top-quarter offset).
     lateral_mm = np.linspace(-width_mm / 2.0, width_mm / 2.0, n_cols)
@@ -53,5 +55,5 @@ def reslice_rectangular_plane(
         inside &= (vox[axis] >= 0.0) & (vox[axis] <= size - 1)
 
     cval = float(np.min(data))
-    sampled = map_coordinates(data, vox[:3], order=1, mode="constant", cval=cval)
+    sampled = map_coordinates(data, vox[:3], order=order, mode="constant", cval=cval)
     return sampled.reshape(n_rows, n_cols), inside.reshape(n_rows, n_cols)
