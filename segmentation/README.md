@@ -6,19 +6,40 @@ liver dataset (`data/liver_seg/`, built by `renderer_training/build_liver_datase
 **Group A (this):** LIMITED real US only — get the pipeline working, get a baseline Dice.
 **Group B (later):** limited real + generated US — same code, add the synthetic frames to train.
 
+## Flow
+
+```
+train split ──train──▶ SegHead (SAM2 encoder frozen)  ─save─▶ head_best.pt
+test  split ──apply head (predict.py)──▶ predicted masks ──vs GT──▶ Dice / IoU + overlay
+```
+
+Two scripts: `train_sam2_head.py` fits the head on the (limited) train split; `predict.py`
+loads the trained head and segments a split (default test), saving masks + metrics + a figure.
+
 ## Run (Alex / SLURM)
 
 ```bash
 # 1. once, on the LOGIN node (needs internet): venv + torch + sam2 + checkpoint
 bash segmentation/setup_env.sh
 
-# 2. submit the GPU job
+# 2. TRAIN the head on limited real (GPU job)
 sbatch segmentation/train.slurm
 # watch: tail -f segmentation/logs/sam2-liver-A_<jobid>.out
+# -> runs/seg_sam2_A_limited/{head_best.pt, metrics.json}
+
+# 3. SEGMENT the test set with the trained head (a few min; GPU)
+source $WORK/venvs/sam2seg/bin/activate
+python segmentation/predict.py \
+    --sam2-ckpt $WORK/sam2/sam2.1_hiera_small.pt \
+    --head runs/seg_sam2_A_limited/head_best.pt --split test
+# -> runs/seg_sam2_A_limited/predict_test/{predictions.npy, per_frame.csv, overlay.png}
 ```
 
 Defaults: SAM2.1 Hiera-small, 40 positive + 40 negative train frames, 60 epochs, 1× A40.
 Override the venv/checkpoint paths via `SAM2_VENV` / `SAM2_CKPT` / `SAM2_CFG` env vars.
+
+`train_sam2_head.py` also evaluates test Dice every 5 epochs (quick signal); `predict.py` is
+the standalone step that saves the actual predicted masks + per-frame scores + overlay figure.
 
 ## What it does
 
