@@ -3,6 +3,7 @@
 #SBATCH --account=b306dd
 #SBATCH --partition=a40
 #SBATCH --gres=gpu:a40:1
+#SBATCH --ntasks=1
 #SBATCH --time=02:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --output=segmentation/logs/%x_%j.out

@@ -162,8 +162,6 @@ def main() -> None:
     embed = load_sam2_encoder(args.sam2_cfg, args.sam2_ckpt, device)
     head = SegHead().to(device)
     opt = torch.optim.AdamW(head.parameters(), lr=args.lr, weight_decay=1e-4)
-    global IMAGENET_MEAN, IMAGENET_STD
-    IMAGENET_MEAN = IMAGENET_MEAN.to(device); IMAGENET_STD = IMAGENET_STD.to(device)
 
     log, best = [], -1.0
     for ep in range(1, args.epochs + 1):

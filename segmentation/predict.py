@@ -26,7 +26,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 import sys
 sys.path.insert(0, str(REPO_ROOT / "segmentation"))
 from train_sam2_head import LiverSet, SegHead, load_sam2_encoder, dice_iou  # noqa: E402
-import train_sam2_head as T                                                # noqa: E402
 
 
 def main() -> None:
@@ -44,10 +43,9 @@ def main() -> None:
     out = args.out or (args.head.parent / f"predict_{args.split}")
     out.mkdir(parents=True, exist_ok=True)
 
-    T.IMAGENET_MEAN = T.IMAGENET_MEAN.to(device); T.IMAGENET_STD = T.IMAGENET_STD.to(device)
     embed = load_sam2_encoder(args.sam2_cfg, str(args.sam2_ckpt), device)
     head = SegHead().to(device).eval()
-    head.load_state_dict(torch.load(args.head, map_location=device)["head"])
+    head.load_state_dict(torch.load(args.head, map_location=device, weights_only=False)["head"])
 
     ds = LiverSet(args.data, args.split)
     meta = list(csv.DictReader((args.data / args.split / "meta.csv").open()))
