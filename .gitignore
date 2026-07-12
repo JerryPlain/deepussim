@@ -49,3 +49,6 @@ runs/
 *.swp
 .vscode/
 .idea/
+
+# SLURM job logs
+/segmentation/logs/
