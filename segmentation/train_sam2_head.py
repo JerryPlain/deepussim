@@ -24,7 +24,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 IMG_SIZE = 1024                                  # SAM2 image encoder input
@@ -141,6 +141,8 @@ def main() -> None:
     ap.add_argument("--sam2-cfg", default="configs/sam2.1/sam2.1_hiera_s.yaml")
     ap.add_argument("--n-pos", type=int, default=40, help="limited-real positive frames")
     ap.add_argument("--n-neg", type=int, default=40, help="limited-real negative frames")
+    ap.add_argument("--gen-split", default=None,
+                    help="add generated frames from data/liver_seg/<gen-split> to training (Group B)")
     ap.add_argument("--epochs", type=int, default=60)
     ap.add_argument("--batch", type=int, default=4)
     ap.add_argument("--lr", type=float, default=1e-3)
@@ -154,10 +156,16 @@ def main() -> None:
     print(f"device={device}  torch={torch.__version__}", flush=True)
 
     tr_idx = limited_indices(args.data, args.n_pos, args.n_neg, args.seed)
-    tr = DataLoader(LiverSet(args.data, "train", tr_idx), batch_size=args.batch, shuffle=True,
-                    num_workers=4, drop_last=True)
+    train_set = LiverSet(args.data, "train", tr_idx)
+    n_gen = 0
+    if args.gen_split:                                               # Group B: + generated US
+        gen_set = LiverSet(args.data, args.gen_split)
+        n_gen = len(gen_set)
+        train_set = ConcatDataset([train_set, gen_set])
+    tr = DataLoader(train_set, batch_size=args.batch, shuffle=True, num_workers=4, drop_last=True)
     te = DataLoader(LiverSet(args.data, "test"), batch_size=args.batch, shuffle=False, num_workers=4)
-    print(f"train (limited): {len(tr_idx)} frames  |  test: {len(te.dataset)} frames", flush=True)
+    print(f"train: {len(tr_idx)} real (limited){f' + {n_gen} generated' if n_gen else ''}"
+          f"  |  test: {len(te.dataset)} frames", flush=True)
 
     embed = load_sam2_encoder(args.sam2_cfg, args.sam2_ckpt, device)
     head = SegHead().to(device)
