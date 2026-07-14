@@ -29,14 +29,15 @@ export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 
 nvidia-smi --query-gpu=name,memory.total --format=csv,noheader || true
 
-# Group A (default): 40 real only. Group B: set GEN_SPLIT=gen OUT=runs/seg_sam2_B_gen
+# Group A (default): 40 real only. Group B: set GEN_SPLIT=gen. SEED / OUT override per run.
 OUT="${OUT:-runs/seg_sam2_A_limited}"
+SEED="${SEED:-0}"
 GEN_ARGS=""
 [ -n "${GEN_SPLIT:-}" ] && GEN_ARGS="--gen-split ${GEN_SPLIT}"
 
 srun python segmentation/train_sam2_head.py \
     --sam2-ckpt "$CKPT" \
     --sam2-cfg  "$CFG" \
-    --n-pos 40 --n-neg 40 \
+    --n-pos 40 --n-neg 40 --seed "$SEED" \
     --epochs 60 --batch 4 --lr 1e-3 \
     $GEN_ARGS --out "$OUT"
