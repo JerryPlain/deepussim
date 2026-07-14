@@ -1,0 +1,18 @@
+id,class,voxels,vol_pct,largest_cc_pct,frames_gt2pct,n_frames,usable
+2,liver,5815337,12.236,99.3,79,150,1
+11,heart,1403865,2.954,100.0,45,150,1
+8,inferior lobe of right lung,492854,1.037,88.8,2,150,0
+5,inferior lobe of left lung,368625,0.776,99.7,0,150,0
+3,stomach,195502,0.411,97.6,0,150,0
+4,superior lobe of left lung,147116,0.31,99.9,0,150,0
+13,brain,92464,0.195,100.0,1,150,0
+7,middle lobe of right lung,81322,0.171,62.2,0,150,0
+17,costal cartilage,14750,0.031,88.1,0,150,0
+9,small bowel,3034,0.006,98.4,0,150,0
+16,left rib 8,2801,0.006,58.8,0,150,0
+14,skull,2508,0.005,37.2,0,150,0
+12,aorta,1451,0.003,100.0,0,150,0
+10,colon,772,0.002,85.5,0,150,0
+1,spleen,696,0.001,58.0,0,150,0
+6,superior lobe of right lung,112,0.0,57.1,0,150,0
+15,left rib 7,64,0.0,100.0,0,150,0
