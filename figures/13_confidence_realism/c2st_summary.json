@@ -1,0 +1,6 @@
+{
+  "n_per_class": 243,
+  "held_out_accuracy": 1.0,
+  "auc": 1.0,
+  "interpretation": "0.5=indistinguishable(realistic); ->1.0=separable(domain gap)"
+}
