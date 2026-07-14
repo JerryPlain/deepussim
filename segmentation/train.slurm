@@ -35,9 +35,13 @@ SEED="${SEED:-0}"
 GEN_ARGS=""
 [ -n "${GEN_SPLIT:-}" ] && GEN_ARGS="--gen-split ${GEN_SPLIT}"
 
+# NPOS/NNEG default to the limited-real budget (40); set both large (e.g. 1000) for FULL real.
+NPOS="${NPOS:-40}"
+NNEG="${NNEG:-40}"
+
 srun python segmentation/train_sam2_head.py \
     --sam2-ckpt "$CKPT" \
     --sam2-cfg  "$CFG" \
-    --n-pos 40 --n-neg 40 --seed "$SEED" \
+    --n-pos "$NPOS" --n-neg "$NNEG" --seed "$SEED" \
     --epochs 60 --batch 4 --lr 1e-3 \
     $GEN_ARGS --out "$OUT"
