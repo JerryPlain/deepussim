@@ -21,11 +21,35 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+from scipy.ndimage import distance_transform_edt, binary_erosion
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 import sys
 sys.path.insert(0, str(REPO_ROOT / "segmentation"))
 from train_sam2_head import LiverSet, SegHead, load_sam2_encoder, dice_iou  # noqa: E402
+
+
+def _surface(m: np.ndarray) -> np.ndarray:
+    """Boundary pixels of a binary mask (mask minus its erosion)."""
+    m = m.astype(bool)
+    return m & ~binary_erosion(m)
+
+
+def surface_dice(pred: np.ndarray, gt: np.ndarray, tau_px: float) -> float:
+    """Normalized Surface Dice @ tolerance tau (pixels): fraction of each boundary within
+    tau of the other. Fair to a coarse GT whose exact boundary is uncertain. GT must be
+    non-empty (call only on liver-positive frames)."""
+    sp, sg = _surface(pred), _surface(gt)
+    np_, ng = int(sp.sum()), int(sg.sum())
+    if np_ == 0 and ng == 0:
+        return 1.0
+    if np_ == 0 or ng == 0:
+        return 0.0
+    dt_g = distance_transform_edt(~sg)        # distance from every pixel to nearest GT boundary
+    dt_p = distance_transform_edt(~sp)
+    p_close = int((dt_g[sp] <= tau_px).sum())
+    g_close = int((dt_p[sg] <= tau_px).sum())
+    return (p_close + g_close) / (np_ + ng)
 
 
 def main() -> None:
@@ -35,9 +59,12 @@ def main() -> None:
     ap.add_argument("--sam2-cfg", default="configs/sam2.1/sam2.1_hiera_s.yaml")
     ap.add_argument("--head", type=Path, required=True, help="trained head_best.pt")
     ap.add_argument("--split", default="test")
+    ap.add_argument("--tau-mm", type=float, default=3.0, help="NSD tolerance in mm (~GT uncertainty)")
+    ap.add_argument("--mm-per-px", type=float, default=0.166112957, help="US pixel spacing (mm/px)")
     ap.add_argument("--n-viz", type=int, default=8, help="frames to draw in overlay.png")
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
+    tau_px = args.tau_mm / args.mm_per_px
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     out = args.out or (args.head.parent / f"predict_{args.split}")
@@ -51,7 +78,7 @@ def main() -> None:
     meta = list(csv.DictReader((args.data / args.split / "meta.csv").open()))
 
     preds = np.zeros((len(ds), *ds.masks.shape[1:]), np.uint8)
-    rows, dices, ious, dices_pos = [], [], [], []
+    rows, dices_pos, ious_pos, nsd_pos = [], [], [], []
     with torch.no_grad():
         for i in range(len(ds)):
             img, _, full, j = ds[i]
@@ -60,12 +87,13 @@ def main() -> None:
             pred_bin = (torch.sigmoid(pred)[0, 0].cpu() > 0.5).float()
             preds[i] = pred_bin.numpy().astype(np.uint8)
             d, iou = dice_iou(pred_bin, full)
-            dices.append(d); ious.append(iou)
             is_pos = int(full.sum() > 0)
+            nsd = surface_dice(preds[i], full.numpy().astype(bool), tau_px) if is_pos else float("nan")
             if is_pos:
-                dices_pos.append(d)
+                dices_pos.append(d); ious_pos.append(iou); nsd_pos.append(nsd)
             rows.append({"sequence": meta[j]["sequence"], "frame": meta[j]["frame"],
-                         "is_positive": is_pos, "dice": round(d, 4), "iou": round(iou, 4)})
+                         "is_positive": is_pos, "nsd": round(nsd, 4) if is_pos else "",
+                         "dice": round(d, 4), "iou": round(iou, 4)})
 
     np.save(out / "predictions.npy", preds)
     with (out / "per_frame.csv").open("w", newline="") as fh:
@@ -90,11 +118,18 @@ def main() -> None:
         fig.suptitle(f"{args.split}: GT (red) vs prediction (lime)")
         fig.tight_layout(); fig.savefig(out / "overlay.png", dpi=115)
 
-    print(f"{args.split}: {len(ds)} frames")
-    print(f"  Dice  (all)       = {np.mean(dices):.3f}")
-    print(f"  IoU   (all)       = {np.mean(ious):.3f}")
-    print(f"  Dice  (liver-pos) = {np.mean(dices_pos) if dices_pos else 0:.3f}  ({len(dices_pos)} frames)")
-    print(f"wrote {out}/predictions.npy, per_frame.csv, overlay.png")
+    npos = len(dices_pos)
+    print(f"{args.split}: {len(ds)} frames  ({npos} liver-positive)  [metrics on positive frames]")
+    print(f"  NSD @ {args.tau_mm:.0f}mm (primary) = {np.mean(nsd_pos) if npos else 0:.3f}   (fair to coarse GT)")
+    print(f"  Dice  (reference)      = {np.mean(dices_pos) if npos else 0:.3f}")
+    print(f"  IoU   (reference)      = {np.mean(ious_pos) if npos else 0:.3f}")
+    import json
+    (out / "summary.json").write_text(json.dumps({
+        "split": args.split, "n_positive": npos, "tau_mm": args.tau_mm,
+        "nsd": float(np.mean(nsd_pos)) if npos else 0.0,
+        "dice": float(np.mean(dices_pos)) if npos else 0.0,
+        "iou": float(np.mean(ious_pos)) if npos else 0.0}, indent=2))
+    print(f"wrote {out}/predictions.npy, per_frame.csv, summary.json, overlay.png")
 
 
 if __name__ == "__main__":

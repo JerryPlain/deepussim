@@ -24,7 +24,7 @@ python -m pip install -U pip
 python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
 # SAM2 (image encoder only is needed; the optional CUDA postproc ext is not required)
 python -m pip install "git+https://github.com/facebookresearch/sam2.git"
-python -m pip install numpy matplotlib
+python -m pip install numpy matplotlib scipy
 
 mkdir -p "$CKPT_DIR"
 if [ ! -f "$CKPT_DIR/$CKPT" ]; then
