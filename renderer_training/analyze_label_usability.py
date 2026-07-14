@@ -29,6 +29,7 @@ import SimpleITK as sitk                                                  # noqa
 from reslice.frame import affine_from_sitk                              # noqa: E402
 from reslice.io import load_volume_data                                 # noqa: E402
 from renderer_training.project_labels_to_us import sector_zoom_pair     # noqa: E402
+from style.style import figure, save, C, TYPE, label_subplot           # noqa: E402
 
 OUT = REPO_ROOT / "figures" / "10_label_class_usability"
 
@@ -82,25 +83,48 @@ def main() -> None:
     with (OUT / "class_usability.csv").open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
 
-    # figure: two bars
-    import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
-    labels = [r["class"] for r in rows]
-    volp = [r["vol_pct"] for r in rows]
-    frp = [r["frames_gt2pct"] for r in rows]
-    colors = ["#2ca02c" if r["usable"] else "#c0c0c0" for r in rows]
-    fig, ax = plt.subplots(1, 2, figsize=(15, 6))
-    y = np.arange(len(rows))
-    ax[0].barh(y, volp, color=colors); ax[0].set_yticks(y); ax[0].set_yticklabels(labels, fontsize=8)
-    ax[0].invert_yaxis(); ax[0].set_xscale("log"); ax[0].set_xlabel("share of CBCT volume (%, log)")
-    ax[0].set_title("(A) 3D structure size — only liver/heart are large")
-    for i, r in enumerate(rows):
-        ax[0].text(max(volp[i], 1e-3), i, f"  {r['largest_cc_pct']:.0f}% CC", va="center", fontsize=6)
-    ax[1].barh(y, frp, color=colors); ax[1].set_yticks(y); ax[1].set_yticklabels([]); ax[1].invert_yaxis()
-    ax[1].set_xlabel(f"# US frames with >2% coverage (of {nfr})")
-    ax[1].set_title("(B) actually imaged by the US sweeps")
-    fig.suptitle("Only liver (and heart) are viable US-segmentation targets  (green = usable)")
-    fig.tight_layout(); fig.savefig(OUT / "class_usability.png", dpi=120)
-    print(f"wrote {OUT}/class_usability.png and class_usability.csv")
+    # publication figure (PDF + PNG): two panels, usable classes highlighted
+    import matplotlib; matplotlib.use("Agg")
+    labels = [r["class"].replace("inferior ", "inf. ").replace("superior ", "sup. ")
+              .replace(" lobe of", "").replace(" lung", " lung") for r in rows]
+    volp = np.array([r["vol_pct"] for r in rows])
+    frp = np.array([r["frames_gt2pct"] for r in rows])
+    usable = [bool(r["usable"]) for r in rows]
+    colors = [C["ours"] if u else C["neutral"] for u in usable]
+
+    fig, (axA, axB) = figure(ncols=2, width="double", height=3.4)
+    y = np.arange(len(rows))[::-1]                                    # largest at top
+
+    axA.barh(y, np.maximum(volp, 5e-4), color=colors, edgecolor="white", linewidth=0.4)
+    axA.set_yticks(y); axA.set_yticklabels(labels, fontsize=TYPE["small"])
+    axA.set_xscale("log"); axA.set_xlim(5e-4, 30)
+    axA.set_xlabel("Share of CBCT volume (%)")
+    axA.set_title("3D structure size")
+    axA.grid(True, axis="x", which="major"); axA.grid(False, axis="y")
+    for yi, r in zip(y, rows):
+        axA.text(r["vol_pct"] * 1.4 if r["vol_pct"] > 5e-4 else 6e-4, yi,
+                 f"{r['largest_cc_pct']:.0f}% CC", va="center", ha="left",
+                 fontsize=TYPE["tiny"], color=C["dark"])
+
+    axB.barh(y, frp, color=colors, edgecolor="white", linewidth=0.4)
+    axB.set_yticks(y); axB.set_yticklabels([])
+    axB.set_xlim(0, nfr * 1.02)
+    axB.set_xlabel(f"US frames imaged (of {nfr})")
+    axB.set_title("Imaged by the US sweeps")
+    axB.grid(True, axis="x", which="major"); axB.grid(False, axis="y")
+    for yi, v in zip(y, frp):
+        if v > 0:
+            axB.text(v + nfr * 0.015, yi, str(int(v)), va="center", ha="left",
+                     fontsize=TYPE["tiny"], color=C["dark"])
+
+    label_subplot(axA, "a", x=-0.55); label_subplot(axB, "b", x=-0.04)
+    # legend proxies
+    from matplotlib.patches import Patch
+    axB.legend(handles=[Patch(facecolor=C["ours"], label="usable target"),
+                        Patch(facecolor=C["neutral"], label="rejected")],
+               loc="lower right", fontsize=TYPE["small"])
+    save(fig, str(OUT / "class_usability"))
+    print(f"wrote {OUT}/class_usability.pdf + .png and class_usability.csv")
     for r in rows[:4]:
         print(f"  {r['class']:28s} vol={r['vol_pct']:.2f}%  CC={r['largest_cc_pct']:.0f}%  frames={r['frames_gt2pct']}/{nfr}")
 
