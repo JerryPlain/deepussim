@@ -36,6 +36,7 @@ class RendererParams:
     reflect_scale: float = 1.0
     scatter_scale: float = 0.3       # diffuse tissue backscatter (fills homogeneous tissue); 0 = interfaces only
     shadow_scale: float = 1.0        # cumulative-transmission (acoustic shadowing); 0 disables
+    beam_width_px: float = 2.5       # lateral (beam-width) blur — smooths per-scanline striping; 0 disables
     speckle_sigma: float = 0.5
     gain_db: float = 0.0
     dynamic_range_db: float = 50.0
@@ -99,6 +100,12 @@ def bmode(
     else:
         shadow = 1.0
     env = (refl + scatter) * atten_lin[:, None] * shadow
+
+    # (3b) Beam-width lateral blur: a finite beam smooths neighbouring scan lines, removing the
+    # per-column striping of an independent-scanline model (real US has this lateral coherence).
+    if params.beam_width_px > 0:
+        from scipy.ndimage import gaussian_filter1d
+        env = gaussian_filter1d(env, params.beam_width_px, axis=1, mode="nearest")
 
     # (4) Multiplicative speckle.
     if params.speckle_sigma > 0:
