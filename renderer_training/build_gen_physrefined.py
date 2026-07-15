@@ -1,12 +1,12 @@
 #!/usr/bin/env python
-"""Render the sim2real US and build data/liver_seg/gen_sim2real (same poses & masks as gen).
+"""Render the physics-refined US and build data/liver_seg/gen_physrefined (same poses & masks as gen).
 
-The sim2real generator (cut_phys2real) maps physics_US -> real-looking US. We already have the
-physics US for the gen poses in data/liver_seg/gen_phys/images.npy, so sim2real US = G(physics US).
-Reuse the identical masks -> a controlled 4th arm (A / +CUT / +physics / +sim2real).
+The physics-refined generator (cut_phys2real) maps physics_US -> real-looking US. We already have the
+physics US for the gen poses in data/liver_seg/gen_phys/images.npy, so physics-refined US = G(physics US).
+Reuse the identical masks -> a controlled 4th arm (A / +CUT / +physics / +physics-refined).
 
     source $WORK/venvs/sam2seg/bin/activate ; export PYTHONPATH=$PWD/src
-    python renderer_training/build_gen_sim2real.py
+    python renderer_training/build_gen_physrefined.py
 """
 from __future__ import annotations
 
@@ -34,10 +34,10 @@ def _to_unit(x):
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--gen-ckpt", type=Path, default=REPO_ROOT / "runs" / "renderer_cut_phys2real" / "generator.pt")
+    ap.add_argument("--gen-ckpt", type=Path, default=REPO_ROOT / "runs" / "renderer_cut_physrefined" / "generator.pt")
     ap.add_argument("--phys", type=Path, default=REPO_ROOT / "data" / "liver_seg" / "gen_phys")
-    ap.add_argument("--out", type=Path, default=REPO_ROOT / "data" / "liver_seg" / "gen_sim2real")
-    ap.add_argument("--preview", type=Path, default=REPO_ROOT / "figures" / "16_sim2real")
+    ap.add_argument("--out", type=Path, default=REPO_ROOT / "data" / "liver_seg" / "gen_physrefined")
+    ap.add_argument("--preview", type=Path, default=REPO_ROOT / "figures" / "16_physrefined_samples")
     args = ap.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -59,25 +59,25 @@ def main() -> None:
     np.save(args.out / "images.npy", sim_u8)
     np.save(args.out / "masks.npy", np.load(args.phys / "masks.npy"))
     shutil.copy(args.phys / "meta.csv", args.out / "meta.csv")
-    print(f"wrote {args.out}: {len(sim_u8)} sim2real frames {sim_u8.shape}")
+    print(f"wrote {args.out}: {len(sim_u8)} physics-refined frames {sim_u8.shape}")
 
-    # preview: physics -> sim2real vs CUT-gen vs real, a few frames
+    # preview: physics -> physics-refined vs CUT-gen vs real, a few frames
     import matplotlib; matplotlib.use("Agg"); import matplotlib.pyplot as plt
     from style.style import save, TYPE
     cut = np.load(REPO_ROOT / "data" / "liver_seg" / "gen" / "images.npy")
     real = np.load(REPO_ROOT / "data" / "liver_seg" / "train" / "images.npy")
     rows = 4
     fig, ax = plt.subplots(rows, 4, figsize=(11, 2.7 * rows))
-    cols = ["physics US (input)", "sim2real (output)", "CUT gen", "real US (example)"]
+    cols = ["physics US (input)", "physics-refined (output)", "CUT gen", "real US (example)"]
     for r in range(rows):
         for c, im in enumerate([phys[r], sim_u8[r], cut[r], real[r]]):
             ax[r, c].imshow(im, cmap="gray"); ax[r, c].axis("off")
             if r == 0:
                 ax[r, c].set_title(cols[c], fontsize=TYPE["small"])
-    fig.suptitle("sim2real: physics-US refined to real texture", fontsize=TYPE["body"])
+    fig.suptitle("physics-refined: physics-US refined to real texture", fontsize=TYPE["body"])
     fig.tight_layout()
     args.preview.mkdir(parents=True, exist_ok=True)
-    save(fig, str(args.preview / "sim2real_samples"))
+    save(fig, str(args.preview / "physrefined_samples"))
 
 
 if __name__ == "__main__":

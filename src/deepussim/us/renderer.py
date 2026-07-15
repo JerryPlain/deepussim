@@ -39,7 +39,7 @@ class RendererParams:
     beam_width_px: float = 0.0       # lateral (beam-width) blur; available but OFF by default — it
     #                                  smooths per-scanline striping yet shifted the deep-field
     #                                  physics worse (deep-conf AUC 0.56->0.79) and regressed the
-    #                                  sim2real downstream (0.346->0.332), so keep it off.
+    #                                  physics-refined downstream (0.346->0.332), so keep it off.
     speckle_sigma: float = 0.5
     gain_db: float = 0.0
     dynamic_range_db: float = 50.0

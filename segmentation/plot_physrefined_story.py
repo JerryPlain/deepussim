@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""Sim2real story: renderer physics realism predicts downstream augmentation value.
+"""Physics-refined story: renderer physics realism predicts downstream augmentation value.
 
-Panel (a): four-arm downstream NSD — real-only vs +CUT / +physics / +sim2real gen.
+Panel (a): four-arm downstream NSD — real-only vs +CUT / +physics / +physics-refined gen.
 Panel (b): correlation across renderer variants (incl. the beam-blur v2 that regressed) between
 the physics-realism metric (deep-field confidence AUC vs real, ->0.5 = real-like) and downstream
 NSD. A strong negative correlation = the (cheap, physics) metric predicts downstream utility,
@@ -20,16 +20,16 @@ sys.path.insert(0, str(REPO_ROOT))
 from style.style import figure, save, C, TYPE  # noqa: E402
 
 RUNS = REPO_ROOT / "runs"
-OUT = REPO_ROOT / "figures" / "17_sim2real_story"
+OUT = REPO_ROOT / "figures" / "17_physrefined_story"
 
-# four-arm bars (best sim2real = v1)
+# four-arm bars (best physics-refined = v1)
 BARS = [("real only", "A", C["baseline_a"]), ("+ CUT", "B", C["neutral"]),
-        ("+ physics", "Bphys", C["baseline_c"]), ("+ physics-refined", "Bs2r", C["ours"])]
+        ("+ physics", "Bphys", C["baseline_c"]), ("+ physics-refined", "Bphysref", C["ours"])]
 # renderer variants for the correlation: deep-conf AUC vs real (measured) + downstream run prefix
 RENDERERS = [("CUT", 0.97, "B", C["neutral"]),
              ("physics", 0.66, "Bphys", C["baseline_c"]),
-             ("physics-refined", 0.56, "Bs2r", C["ours"]),
-             ("physics-refined+blur", 0.79, "Bs2rv2", C["baseline_e"])]
+             ("physics-refined", 0.56, "Bphysref", C["ours"]),
+             ("physics-refined+blur", 0.79, "Bphysrefblur", C["baseline_e"])]
 
 
 def _nsd(pfx):
@@ -71,7 +71,12 @@ def main() -> None:
     axB.grid(True, axis="both")
 
     fig.suptitle("Fixing renderer physics improves augmentation; the metric predicts it")
-    save(fig, str(OUT / "sim2real_story"))
+    fig.text(0.5, -0.02,
+             "renderers:  CUT = learned CBCT$\\rightarrow$US    ·    "
+             "physics = rule-based acoustic simulation    ·    "
+             "physics-refined = physics simulation with its TEXTURE refined by the learned net",
+             ha="center", va="top", fontsize=TYPE["tiny"], color=C["dark"])
+    save(fig, str(OUT / "physrefined_story"))
     print("bars:", {n: round(m, 3) for (n, *_), m in zip(BARS, means)})
     print(f"correlation deep-conf AUC vs downstream NSD: r = {r:.3f}")
 

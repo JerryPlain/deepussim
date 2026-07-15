@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""Physics-source training pairs for sim2real CUT: replace CBCT source with its physics render.
+"""Physics-source training pairs for physics-refined CUT: replace CBCT source with its physics render.
 
-The paired CUT currently learns CBCT_sector -> real_US. For sim2real we instead learn
+The paired CUT currently learns CBCT_sector -> real_US. For physics-refined we instead learn
 physics_US -> real_US: same real-US targets, but the SOURCE is the physics render of each CBCT
 sector (deepussim.us.renderer.bmode), which already carries depth attenuation / shadowing. The
 network then only has to add realistic texture, not invent the physics.
