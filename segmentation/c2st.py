@@ -60,7 +60,8 @@ def main() -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     rng = np.random.default_rng(args.seed)
     real = np.load(args.real)
-    gen = np.load(args.gen, allow_pickle=True)["generated_us"]
+    gen = (np.load(args.gen) if str(args.gen).endswith(".npy")
+           else np.load(args.gen, allow_pickle=True)["generated_us"])
     n = min(len(real), len(gen))
     real = real[rng.permutation(len(real))[:n]]                        # balance classes
 
