@@ -3,16 +3,14 @@
 
 Rationale
 ---------
-Every LC2-registered US frame has a refined probe pose in CBCT space. The intensity CBCT
-sector at that pose is *known* to align with the real US (that alignment is the whole premise
-of the renderer pairs). So resampling ``labels.nrrd`` on the **same** plane/geometry — but with
-nearest-neighbour sampling so class ids are never blended — yields a per-frame segmentation
-mask that is pixel-aligned with the US, for free. No manual US labelling.
+Every LC2-registered US frame has a refined probe pose in CBCT space. Intensity and labels
+are resliced on the same fitted convex-probe fan, then scan-converted into the fixed real
+B-mode pixel geometry. Labels use nearest-neighbour sampling throughout so class ids are
+never blended.
 
-This reuses ``plot_script.plots_reslice.compare.cbct_sector_zoom``'s geometry verbatim: the
-apex/sector/crop/zoom are all computed from the *intensity* sector, then applied identically to
-the label sector (``order=0``). A self-check reproduces ``pairs.npz['cbct']`` (corr ~1.0) to prove
-the label plane matches the stored, alignment-validated intensity plane.
+The display mapping deliberately does not detect a per-frame CBCT surface or resize a fan
+bounding box. Probe intrinsics are fixed: virtual apex, face/far radii, FOV and pixel scale
+were fitted once from the combined real scan1/8/15 contact envelope.
 
     module load python/3.12-base
     python renderer_training/project_labels_to_us.py --sequence scan1 --n 6
@@ -31,65 +29,70 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from reslice import pose as P                                              # noqa: E402
-from reslice import sector as sec                                         # noqa: E402
 from reslice.frame import affine_from_sitk                               # noqa: E402
+from reslice.fan import ProbeGeometry, reslice_fan, scan_convert_fan      # noqa: E402
 from reslice.io import load_volume_data                                  # noqa: E402
-from reslice.sampling import reslice_rectangular_plane                   # noqa: E402
-from plot_script.plots_reslice.compare import (                          # noqa: E402
-    FAN, SLICE_W, SLICE_H, AXIAL_SIGN, LATERAL_SIGN,
-)
+from reslice.sector import normalize_image                               # noqa: E402
 
 DEFAULT_VOLUME = REPO_ROOT / "data" / "cbct_20260612" / "CBCT.mhd"
 DEFAULT_LABELS = REPO_ROOT / "data" / "cbct_20260612" / "labels.nrrd"
 DEFAULT_PAIRS = REPO_ROOT / "data" / "renderer_lc2_pairs" / "pairs.npz"
 DEFAULT_OUT = REPO_ROOT / "figures" / "9_label_projection_check"
 
+# Fixed B-mode display geometry fitted from Jerry's combined scan1/8/15 contact envelope.
+# Pixel coordinates are (x, y); physical values use Feng's 0.166112957 mm/px calibration.
+CALIBRATED_DISPLAY_SHAPE = (660, 880)
+DEFAULT_US_SPACING_MM = 0.166112957
+DEFAULT_DISPLAY_FAN = {
+    "apex_px": (439.4999999999998, -261.90505706969174),
+    "r0_px": 307.90505706969174,
+    "r1_px": 916.9050570696918,
+    "fov_deg": 69.31467507611598,
+}
+DEFAULT_PROBE_GEOMETRY = ProbeGeometry(
+    radius_mm=51.14701950510025,
+    fov_deg=69.31467507611598,
+    depth_mm=101.162790813,
+    n_ax=512,
+    n_lat=256,
+)
 
-def sector_zoom_pair(vol_int, vol_lab, affine, pose, target_shape):
-    """Resliced (intensity, label) sectors sharing one geometry.
 
-    The intensity path is byte-for-byte ``cbct_sector_zoom``; the label path samples the
-    same plane with ``order=0`` and inherits the identical apex/sector/crop/zoom.
+def sector_zoom_pair(
+    vol_int,
+    vol_lab,
+    affine,
+    pose,
+    target_shape,
+    *,
+    display_fan: dict | None = None,
+    probe_geometry: ProbeGeometry | None = None,
+):
+    """Return intensity and labels in the fixed real B-mode pixel coordinate system.
+
+    The historical function name is retained for downstream callers, but no crop/zoom is
+    performed. Both volumes are sampled on one polar probe grid and scan-converted with one
+    fixed display calibration. Labels use nearest-neighbour sampling in both operations.
     """
-    plane = P.plane_from_probe_pose(pose, "probe-xz", 0.0)
-    rect_i, valid = reslice_rectangular_plane(
-        vol_int, affine, plane, width_mm=SLICE_W, height_mm=SLICE_H,
-        n_rows=target_shape[0], n_cols=target_shape[1],
-        axial_sign=AXIAL_SIGN, lateral_sign=LATERAL_SIGN, order=1)
-    rect_l, _ = reslice_rectangular_plane(
-        vol_lab, affine, plane, width_mm=SLICE_W, height_mm=SLICE_H,
-        n_rows=target_shape[0], n_cols=target_shape[1],
-        axial_sign=AXIAL_SIGN, lateral_sign=LATERAL_SIGN, order=0)
-    rect_i, valid = np.rot90(rect_i, 2), np.rot90(valid, 2)
-    rect_l = np.rot90(rect_l, 2)
+    target_shape = tuple(int(x) for x in target_shape)
+    if target_shape != CALIBRATED_DISPLAY_SHAPE:
+        raise ValueError(
+            f"US display calibration is for {CALIBRATED_DISPLAY_SHAPE}, got {target_shape}; "
+            "fit a display fan for the new scanner resolution instead of resizing it"
+        )
 
-    _, thr, _ = sec.detect_content_top_row(rect_i, valid, threshold=None, min_pixels=8)
-    probe_px = sec.project_point_to_display_pixel(
-        pose[:3, 3], plane, width_mm=SLICE_W, height_mm=SLICE_H,
-        rows=rect_i.shape[0], cols=rect_i.shape[1], axial_sign=AXIAL_SIGN,
-        lateral_sign=LATERAL_SIGN, display_rot180=True)
-    depth_dir = sec.project_direction_to_display_rc(
-        pose[:3, 2], plane, axial_sign=AXIAL_SIGN, lateral_sign=LATERAL_SIGN,
-        display_rot180=True)
-    apex, _ = sec.apex_from_pose_and_edge(
-        rect_i, valid, threshold=thr, probe_pixel_rc=probe_px,
-        depth_direction_rc=depth_dir, max_line_distance_px=5.0)
-    sector_i, mask, dbg = sec.apply_sector(
-        rect_i, valid, top_margin_rows=2, apex_col_fraction=0.5,
-        apex_pixel_rc=apex, depth_direction_rc=depth_dir,
-        content_threshold=None, content_min_pixels=8,
-        width_mm=SLICE_W, height_mm=SLICE_H, **FAN)
-    crop_mask = sec.sector_mask_in_display_image(
-        rect_i.shape, dbg["apex_row"], dbg["apex_col"], np.asarray(dbg["depth_direction_rc"]),
-        dbg["fov_deg"], dbg["depth_mm"], 0.0, dbg["mm_per_row"], dbg["mm_per_col"])
+    fan = DEFAULT_DISPLAY_FAN if display_fan is None else display_fan
+    geom = DEFAULT_PROBE_GEOMETRY if probe_geometry is None else probe_geometry
+    polar_i = reslice_fan(vol_int, affine, pose, geom, order=1)
+    polar_l = reslice_fan(vol_lab, affine, pose, geom, order=0)
 
-    int_zoom, _ = sec.crop_and_zoom_sector(
-        sec.normalize_image(sector_i), mask, crop_mask, tuple(target_shape), margin_px=18, order=1)
-    sector_l = np.where(mask, rect_l, 0.0)
-    lab_zoom, _ = sec.crop_and_zoom_sector(
-        sector_l, mask, crop_mask, tuple(target_shape), margin_px=18, order=0)
-    return int_zoom, np.rint(lab_zoom).astype(np.int16)
+    int_display = scan_convert_fan(
+        normalize_image(polar_i), target_shape, **fan, order=1, cval=0.0
+    )
+    lab_display = scan_convert_fan(
+        polar_l, target_shape, **fan, order=0, cval=0.0
+    )
+    return int_display, np.rint(lab_display).astype(np.int16)
 
 
 def _load_names(path: Path) -> dict[int, str]:
@@ -129,7 +132,8 @@ def main() -> None:
     import SimpleITK as sitk
     affine = affine_from_sitk(sitk.ReadImage(str(args.volume)))
 
-    us_all = pairs["us"]; cbct_all = pairs["cbct"]; poses = pairs["refined_poses"]
+    us_all = pairs["us"]
+    poses = pairs["refined_poses"]
 
     import matplotlib
     matplotlib.use("Agg")
@@ -142,16 +146,14 @@ def main() -> None:
     cover_accum: dict[int, int] = {}
     masks_out = []
 
+    def _n(x):
+        lo, hi = np.nanpercentile(x, [1, 99])
+        return np.clip((x - lo) / max(hi - lo, 1e-6), 0, 1)
+
     for row, i in enumerate(sel):
         us = np.asarray(us_all[i], dtype=float)
-        int_zoom, lab = sector_zoom_pair(vol_int, vol_lab, affine, poses[i], us.shape[:2])
+        _, lab = sector_zoom_pair(vol_int, vol_lab, affine, poses[i], us.shape[:2])
         masks_out.append(lab)
-
-        # self-check: our intensity plane must reproduce the stored, alignment-validated cbct
-        a = cbct_all[i].astype(float)
-        def _n(x):
-            lo, hi = np.nanpercentile(x, [1, 99]); return np.clip((x - lo) / max(hi - lo, 1e-6), 0, 1)
-        corr = float(np.corrcoef(_n(a).ravel(), _n(int_zoom).ravel())[0, 1])
 
         present = [(c, int((lab == c).sum())) for c in np.unique(lab) if c != 0]
         for c, n in present:
@@ -159,7 +161,10 @@ def main() -> None:
         tag = ", ".join(f"{names.get(c, c)}:{100*n/lab.size:.1f}%" for c, n in present) or "(none)"
 
         usn = _n(us)
-        axes[row, 0].imshow(usn, cmap="gray"); axes[row, 0].set_title(f"real US  ({want} f{int(pairs['frame_index'][i])})", fontsize=8)
+        axes[row, 0].imshow(usn, cmap="gray")
+        axes[row, 0].set_title(
+            f"real US  ({want} f{int(pairs['frame_index'][i])})", fontsize=8
+        )
         axes[row, 1].imshow(usn, cmap="gray")
         # colour overlay of labels on the US
         over = np.zeros((*lab.shape, 4))
@@ -169,8 +174,12 @@ def main() -> None:
             col = cm.tab20((c % 20) / 20.0)
             over[lab == c] = (*col[:3], 0.45)
         axes[row, 1].imshow(over)
-        axes[row, 1].set_title(f"US + projected labels\ncorr(int,stored)={corr:.3f}", fontsize=8)
-        axes[row, 2].imshow(lab, cmap="tab20", vmin=0, vmax=20); axes[row, 2].set_title(f"label map\n{tag}", fontsize=7)
+        axes[row, 1].set_title(
+            f"US + projected labels\nfixed fan, {DEFAULT_US_SPACING_MM:.6f} mm/px",
+            fontsize=8,
+        )
+        axes[row, 2].imshow(lab, cmap="tab20", vmin=0, vmax=20)
+        axes[row, 2].set_title(f"label map\n{tag}", fontsize=7)
         for a_ in axes[row]:
             a_.axis("off")
 

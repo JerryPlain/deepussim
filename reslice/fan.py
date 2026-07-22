@@ -61,6 +61,77 @@ def reslice_fan(
     return sampled.reshape(geom.n_ax, geom.n_lat)
 
 
+def scan_convert_fan(
+    polar: np.ndarray,
+    output_shape: tuple[int, int],
+    *,
+    apex_px: tuple[float, float],
+    r0_px: float,
+    r1_px: float,
+    fov_deg: float,
+    order: int = 1,
+    cval: float = 0.0,
+) -> np.ndarray:
+    """Map a polar fan image back to the fixed B-mode display pixel grid.
+
+    ``polar`` follows :func:`reslice_fan`'s ``(depth, scan-line)`` layout.  The display
+    geometry is measured from the real B-mode image: ``apex_px`` is ``(x, y)`` of the
+    virtual apex, ``r0_px`` / ``r1_px`` are the face and far radii, and ``fov_deg`` is
+    the total fan angle.  Mapping directly into ``output_shape`` preserves the scanner's
+    pixel geometry; unlike a fan-bounding-box resize, it never stretches rows and columns
+    by different factors.
+
+    Use ``order=1`` for intensity and ``order=0`` for discrete labels.  Nearest-neighbour
+    conversion returns the input dtype so label ids remain exact.
+    """
+    from scipy.ndimage import map_coordinates
+
+    source = np.asarray(polar)
+    if source.ndim != 2:
+        raise ValueError(f"polar fan must be 2D, got shape {source.shape}")
+    if r1_px <= r0_px:
+        raise ValueError(f"r1_px must exceed r0_px, got {r0_px} and {r1_px}")
+    if not 0.0 < fov_deg < 180.0:
+        raise ValueError(f"fov_deg must be in (0, 180), got {fov_deg}")
+    if order not in (0, 1):
+        raise ValueError(f"scan conversion supports order 0 or 1, got {order}")
+
+    height, width = (int(output_shape[0]), int(output_shape[1]))
+    if height <= 0 or width <= 0:
+        raise ValueError(f"output_shape must be positive, got {output_shape}")
+
+    yy, xx = np.mgrid[:height, :width].astype(np.float32)
+    apex_x, apex_y = float(apex_px[0]), float(apex_px[1])
+    dx = xx - apex_x
+    dy = yy - apex_y
+    radius = np.hypot(dx, dy)
+    theta = np.arctan2(dx, dy)
+    half_angle = np.deg2rad(float(fov_deg)) / 2.0
+
+    polar_row = (radius - float(r0_px)) / float(r1_px - r0_px) * (source.shape[0] - 1)
+    polar_col = (theta + half_angle) / (2.0 * half_angle) * (source.shape[1] - 1)
+    valid = (
+        (radius >= float(r0_px))
+        & (radius <= float(r1_px))
+        & (np.abs(theta) <= half_angle)
+    )
+
+    sample_source = source if order == 0 else source.astype(np.float32, copy=False)
+    converted = map_coordinates(
+        sample_source,
+        [polar_row.ravel(), polar_col.ravel()],
+        order=order,
+        mode="constant",
+        cval=float(cval),
+        prefilter=False,
+    ).reshape(height, width)
+    converted[~valid] = cval
+
+    if order == 0:
+        return converted.astype(source.dtype, copy=False)
+    return converted.astype(np.float32, copy=False)
+
+
 def fraction_inside(fan_image: np.ndarray, cval: float | None = None) -> float:
     """Fraction of fan pixels that fell inside the volume (anti-graze guard for LC2)."""
     fan = np.asarray(fan_image, dtype=float)
