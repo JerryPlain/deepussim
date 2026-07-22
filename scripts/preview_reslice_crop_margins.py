@@ -102,7 +102,7 @@ def main() -> None:
             )
         )
 
-    ncols = 3
+    ncols = min(3, len(panels))
     nrows = int(np.ceil(len(panels) / ncols))
     fig, axes = plt.subplots(nrows, ncols, figsize=(13.2, 4.6 * nrows), squeeze=False)
     support = _real_fan_support(us.shape[:2])
@@ -116,8 +116,7 @@ def main() -> None:
             ax.contour(support.astype(float), [0.5], colors="red", linewidths=1.4)
             col_text = "same" if col_margin is None else str(col_margin)
             ax.set_title(
-                f"unchanged reslice · row margin={margin}px · col margin={col_text}px · "
-                f"crop near={crop_near:g}mm"
+                f"CBCT crop · row={margin}px · col={col_text}px · near={crop_near:g}mm"
             )
         ax.axis("off")
     fig.suptitle(
