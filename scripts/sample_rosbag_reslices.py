@@ -68,6 +68,14 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--seed", type=int, default=20260722)
+    ap.add_argument(
+        "--crop-margin-px",
+        type=int,
+        default=0,
+        help="final crop margin only; smaller values enlarge the unchanged CBCT fan",
+    )
+    ap.add_argument("--crop-near-mm", type=float, default=9.0)
+    ap.add_argument("--crop-margin-cols-px", type=int, default=-40)
     args = ap.parse_args()
 
     paths = sorted(args.sequences_dir.glob("scan*.npz"), key=_scan_number)
@@ -115,7 +123,15 @@ def main() -> None:
         phantom_from_probe_mm = P.probe_pose_in_phantom_centered_mm(
             world_from_probe, world_from_phantom
         )
-        cbct = cbct_sector_zoom(volume, affine, phantom_from_probe_mm, us.shape[:2])
+        cbct = cbct_sector_zoom(
+            volume,
+            affine,
+            phantom_from_probe_mm,
+            us.shape[:2],
+            crop_margin_px=args.crop_margin_px,
+            crop_near_mm=args.crop_near_mm,
+            crop_margin_cols_px=args.crop_margin_cols_px,
+        )
 
         bag = args.bag_dir / f"{sequence.stem}.bag"
         record = {
@@ -183,6 +199,9 @@ def main() -> None:
         json.dumps(
             {
                 "seed": args.seed,
+                "crop_margin_px": args.crop_margin_px,
+                "crop_near_mm": args.crop_near_mm,
+                "crop_margin_cols_px": args.crop_margin_cols_px,
                 "sampling": "one contact frame per bag plus five additional distinct bags",
                 "volume": str(args.volume),
                 "report": str(args.report),

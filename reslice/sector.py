@@ -289,12 +289,16 @@ def crop_and_zoom_sector(
     target_shape: tuple[int, int],
     margin_px: int,
     order: int = 1,
+    margin_rows_px: int | None = None,
+    margin_cols_px: int | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Crop to the fan bounding box (+margin) and resize to ``target_shape`` (US size).
 
     ``order=1`` (bilinear) for an intensity sector, ``order=0`` (nearest) for a label
     sector so class ids are never blended by the resize.
     """
+    row_margin = int(margin_px if margin_rows_px is None else margin_rows_px)
+    col_margin = int(margin_px if margin_cols_px is None else margin_cols_px)
     hits = np.argwhere(crop_mask)
     if hits.size == 0:
         return np.zeros(target_shape, dtype=np.float32), {
@@ -304,10 +308,14 @@ def crop_and_zoom_sector(
 
     r0, c0 = hits.min(axis=0)
     r1, c1 = hits.max(axis=0) + 1
-    r0 = max(0, int(r0) - int(margin_px))
-    c0 = max(0, int(c0) - int(margin_px))
-    r1 = min(mask.shape[0], int(r1) + int(margin_px))
-    c1 = min(mask.shape[1], int(c1) + int(margin_px))
+    r0 = max(0, int(r0) - row_margin)
+    c0 = max(0, int(c0) - col_margin)
+    r1 = min(mask.shape[0], int(r1) + row_margin)
+    c1 = min(mask.shape[1], int(c1) + col_margin)
+    if r1 <= r0 or c1 <= c0:
+        raise ValueError(
+            f"crop margins collapse bbox: rows=({r0},{r1}) cols=({c0},{c1})"
+        )
 
     crop = np.where(mask[r0:r1, c0:c1], sector_norm[r0:r1, c0:c1], 0.0)
     zoom = (
@@ -323,6 +331,8 @@ def crop_and_zoom_sector(
     return zoomed.astype(np.float32), {
         "crop_bbox_rc": [int(r0), int(c0), int(r1), int(c1)],
         "crop_margin_px": int(margin_px),
+        "crop_margin_rows_px": row_margin,
+        "crop_margin_cols_px": col_margin,
         "zoom_to_shape": list(target_shape),
         "zoom_factor_rc": [float(zoom[0]), float(zoom[1])],
     }

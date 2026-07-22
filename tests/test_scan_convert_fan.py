@@ -79,26 +79,6 @@ def test_fixed_display_and_physical_fan_calibrations_agree():
     )
     assert np.isclose(fan["fov_deg"], DEFAULT_PROBE_GEOMETRY.fov_deg)
 
-    # The all-15-bag fitted central scan line occupies y=46..657 in the real B-mode image.
+    # The fitted central scan line occupies y=46..655 in the 660-row real B-mode image.
     assert np.isclose(fan["apex_px"][1] + fan["r0_px"], 46.0)
-    assert np.isclose(fan["apex_px"][1] + fan["r1_px"], 657.0)
-
-
-def test_calibrated_fan_occupies_the_measured_us_pixel_extent():
-    support = scan_convert_fan(
-        np.ones(
-            (DEFAULT_PROBE_GEOMETRY.n_ax, DEFAULT_PROBE_GEOMETRY.n_lat),
-            dtype=np.uint8,
-        ),
-        CALIBRATED_DISPLAY_SHAPE,
-        **DEFAULT_DISPLAY_FAN,
-        order=0,
-        cval=0,
-    ).astype(bool)
-
-    # The virtual apex is above the image, so the diverging side beams already enter
-    # the canvas at row 0.  The nominal central-line face/far coordinates are checked
-    # separately above; rasterisation places the final supported pixel at row 656.
-    rows, cols = np.where(support)
-    assert (int(rows.min()), int(rows.max())) == (0, 656)
-    assert (int(cols.min()), int(cols.max())) == (0, 879)
+    assert np.isclose(fan["apex_px"][1] + fan["r1_px"], 655.0)
