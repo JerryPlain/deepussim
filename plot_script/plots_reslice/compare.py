@@ -19,20 +19,15 @@ if str(_REPO_ROOT) not in sys.path:
 
 from reslice import pose as P
 from reslice import sector as sec
+from reslice.calibration import US_DISPLAY_FAN, US_DISPLAY_SHAPE, US_PROBE_GEOMETRY
+from reslice.fan import reslice_fan, scan_convert_fan
 from reslice.io import load_transform_4x4, load_volume_data
-from reslice.sampling import reslice_rectangular_plane
 
 # Defaults matching the project's 2026-06-12 setup.
 DEFAULT_REPORT = _REPO_ROOT / "reslice" / "outputs" / "frame_origin000" / "physical_frame_report.json"
 DEFAULT_VOLUME = _REPO_ROOT / "data" / "cbct_20260612" / "CBCT.mhd"
 DEFAULT_PLACEMENT = _REPO_ROOT / "reslice" / "outputs" / "world_from_phantom_liedown.txt"
 DEFAULT_OUT_DIR = _REPO_ROOT / "figures" / "2_cbct_us_reslice_check"
-
-# Fan fitted from the real US (fit_us_geometry on scan1).
-FAN = dict(depth_mm=93.0, fov_deg=57.0, near_mm=15.0)
-SLICE_W, SLICE_H = 360.0, 300.0
-AXIAL_SIGN, LATERAL_SIGN = -1.0, 1.0
-
 
 def _normalize_display(a: np.ndarray) -> np.ndarray:
     a = np.asarray(a, dtype=float)
@@ -41,42 +36,34 @@ def _normalize_display(a: np.ndarray) -> np.ndarray:
 
 
 def cbct_sector_zoom(volume, affine_centered, T_phantom_from_probe_mm, target_shape) -> np.ndarray:
-    """Resliced CBCT fan sector, cropped+zoomed to ``target_shape`` (US size)."""
-    plane = P.plane_from_probe_pose(T_phantom_from_probe_mm, "probe-xz", 0.0)
-    rect, valid = reslice_rectangular_plane(
-        volume, affine_centered, plane, width_mm=SLICE_W, height_mm=SLICE_H,
-        n_rows=target_shape[0], n_cols=target_shape[1],
-        axial_sign=AXIAL_SIGN, lateral_sign=LATERAL_SIGN,
+    """Reslice CBCT directly onto the real scanner's fixed fan pixel geometry.
+
+    The old implementation made a large rectangular slice, detected a content-dependent
+    apex, cropped a fan bounding box with ``margin_px=18`` and resized rows/columns
+    independently.  That can look plausible but cannot preserve scanner pixels.  The fan
+    is now sampled in probe polar coordinates and scan-converted with the calibration fitted
+    from all 15 real acquisitions.
+    """
+    target_shape = tuple(int(x) for x in target_shape)
+    if target_shape != US_DISPLAY_SHAPE:
+        raise ValueError(
+            f"US fan calibration is for {US_DISPLAY_SHAPE}, got {target_shape}; "
+            "fit a new display fan instead of resizing this one"
+        )
+    polar = reslice_fan(
+        volume,
+        affine_centered,
+        T_phantom_from_probe_mm,
+        US_PROBE_GEOMETRY,
+        order=1,
     )
-    rect, valid = np.rot90(rect, 2), np.rot90(valid, 2)
-    _, thr, _ = sec.detect_content_top_row(rect, valid, threshold=None, min_pixels=8)
-    probe_px = sec.project_point_to_display_pixel(
-        T_phantom_from_probe_mm[:3, 3], plane, width_mm=SLICE_W, height_mm=SLICE_H,
-        rows=rect.shape[0], cols=rect.shape[1], axial_sign=AXIAL_SIGN,
-        lateral_sign=LATERAL_SIGN, display_rot180=True,
+    return scan_convert_fan(
+        sec.normalize_image(polar),
+        target_shape,
+        **US_DISPLAY_FAN,
+        order=1,
+        cval=0.0,
     )
-    depth_dir = sec.project_direction_to_display_rc(
-        T_phantom_from_probe_mm[:3, 2], plane, axial_sign=AXIAL_SIGN,
-        lateral_sign=LATERAL_SIGN, display_rot180=True,
-    )
-    apex, _ = sec.apex_from_pose_and_edge(
-        rect, valid, threshold=thr, probe_pixel_rc=probe_px,
-        depth_direction_rc=depth_dir, max_line_distance_px=5.0,
-    )
-    sector, mask, dbg = sec.apply_sector(
-        rect, valid, top_margin_rows=2, apex_col_fraction=0.5,
-        apex_pixel_rc=apex, depth_direction_rc=depth_dir,
-        content_threshold=None, content_min_pixels=8,
-        width_mm=SLICE_W, height_mm=SLICE_H, **FAN,
-    )
-    crop_mask = sec.sector_mask_in_display_image(
-        rect.shape, dbg["apex_row"], dbg["apex_col"], np.asarray(dbg["depth_direction_rc"]),
-        dbg["fov_deg"], dbg["depth_mm"], 0.0, dbg["mm_per_row"], dbg["mm_per_col"],
-    )
-    zoom, _ = sec.crop_and_zoom_sector(
-        sec.normalize_image(sector), mask, crop_mask, tuple(target_shape), margin_px=18
-    )
-    return zoom
 
 
 def compare_grid(

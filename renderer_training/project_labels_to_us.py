@@ -30,6 +30,12 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from reslice.frame import affine_from_sitk                               # noqa: E402
+from reslice.calibration import (                                        # noqa: E402
+    US_DISPLAY_FAN,
+    US_DISPLAY_SHAPE,
+    US_PROBE_GEOMETRY,
+    US_SPACING_MM,
+)
 from reslice.fan import ProbeGeometry, reslice_fan, scan_convert_fan      # noqa: E402
 from reslice.io import load_volume_data                                  # noqa: E402
 from reslice.sector import normalize_image                               # noqa: E402
@@ -41,21 +47,10 @@ DEFAULT_OUT = REPO_ROOT / "figures" / "9_label_projection_check"
 
 # Fixed B-mode display geometry fitted from Jerry's combined scan1/8/15 contact envelope.
 # Pixel coordinates are (x, y); physical values use Feng's 0.166112957 mm/px calibration.
-CALIBRATED_DISPLAY_SHAPE = (660, 880)
-DEFAULT_US_SPACING_MM = 0.166112957
-DEFAULT_DISPLAY_FAN = {
-    "apex_px": (439.4999999999998, -261.90505706969174),
-    "r0_px": 307.90505706969174,
-    "r1_px": 916.9050570696918,
-    "fov_deg": 69.31467507611598,
-}
-DEFAULT_PROBE_GEOMETRY = ProbeGeometry(
-    radius_mm=51.14701950510025,
-    fov_deg=69.31467507611598,
-    depth_mm=101.162790813,
-    n_ax=512,
-    n_lat=256,
-)
+CALIBRATED_DISPLAY_SHAPE = US_DISPLAY_SHAPE
+DEFAULT_US_SPACING_MM = US_SPACING_MM
+DEFAULT_DISPLAY_FAN = US_DISPLAY_FAN
+DEFAULT_PROBE_GEOMETRY = US_PROBE_GEOMETRY
 
 
 def sector_zoom_pair(
