@@ -47,9 +47,9 @@ def cbct_sector_zoom(
     target_shape,
     *,
     crop_margin_px: int = 0,
-    crop_near_mm: float = 9.0,
+    crop_near_mm: float = 15.0,
     crop_margin_rows_px: int | None = None,
-    crop_margin_cols_px: int | None = -40,
+    crop_margin_cols_px: int | None = -66,
 ) -> np.ndarray:
     """Resliced CBCT fan sector, cropped+zoomed to ``target_shape`` (US size).
 
@@ -58,7 +58,8 @@ def cbct_sector_zoom(
     A smaller margin zooms the existing fan farther in.  Increasing ``crop_near_mm`` trims
     unused near-apex space before resize; it does not change the sector's own ``near_mm``.
     The defaults were tuned against the real-US fan outline while holding the upstream
-    reslice fixed: row margin 0 px, column margin -40 px, crop near 9 mm.
+    reslice fixed: row margin 0 px, column margin -66 px, crop near 15 mm.  Using
+    the sector's own near radius for the crop makes its two upper corners touch row 0.
     """
     plane = P.plane_from_probe_pose(T_phantom_from_probe_mm, "probe-xz", 0.0)
     rect, valid = reslice_rectangular_plane(

@@ -74,8 +74,8 @@ def main() -> None:
         default=0,
         help="final crop margin only; smaller values enlarge the unchanged CBCT fan",
     )
-    ap.add_argument("--crop-near-mm", type=float, default=9.0)
-    ap.add_argument("--crop-margin-cols-px", type=int, default=-40)
+    ap.add_argument("--crop-near-mm", type=float, default=15.0)
+    ap.add_argument("--crop-margin-cols-px", type=int, default=-66)
     args = ap.parse_args()
 
     paths = sorted(args.sequences_dir.glob("scan*.npz"), key=_scan_number)
