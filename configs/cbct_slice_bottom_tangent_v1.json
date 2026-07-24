@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "baseline_id": "cbct-slice-bottom-tangent-v1",
+  "captured_on": "2026-07-22",
+  "status": "validated-reference",
+  "git_head_at_capture": "b4d6afa1f4281535a1d58aea7d26cfe051de33dd",
+  "canonical_function": "scripts.preview_us_normal_reslice_region.cbct_bottom_tangent_reslice",
+  "entry_points": {
+    "single_frame": "scripts/preview_us_normal_reslice_region.py",
+    "multi_bag": "scripts/sample_rosbag_reslices.py"
+  },
+  "reference_case": {
+    "sequence": "../deepussim-main/data/sequences_20260612/scan5.npz",
+    "frame": 126,
+    "volume_header": "../cbct_20260612/cbct_20260612/CBCT.mhd",
+    "physical_frame_report": "../deepussim-main/slicer_3.0/outputs/step01_physical_frame_origin000/physical_frame_report.json",
+    "world_from_phantom": "../deepussim-main/slicer_3.0/outputs/yesterday_T_world_from_phantom_liedown.txt"
+  },
+  "parameters": {
+    "plane_mode": "probe-xz",
+    "plane_offset_y_mm": 0.0,
+    "inner_arc_threshold": 30.0,
+    "us_spacing_mm_per_pixel": 0.166112957,
+    "near_mm": 15.0,
+    "surface_detection_plane_width_mm": 360.0,
+    "surface_detection_plane_height_mm": 300.0,
+    "axial_sign": -1.0,
+    "lateral_sign": 1.0,
+    "intensity_interpolation_order": 1,
+    "post_reslice_crop": false,
+    "post_reslice_resize": false,
+    "post_reslice_stretch": false
+  },
+  "geometry": {
+    "inner_boundary": "circle fitted to the bright real-US inner arc",
+    "side_boundaries": "circle normals through the inner-arc/top-border intersections",
+    "outer_boundary": "concentric circle tangent to the bottom image border",
+    "grid": "native US rows and columns with one isotropic US mm/pixel value",
+    "anchor": "validated CBCT surface intersection, then near_mm along probe depth to the central inner arc"
+  },
+  "pose_chain": [
+    "T_world_from_probe = T_world_from_ee @ T_EE_FROM_PROBE",
+    "T_phantom_from_probe = inv(T_world_from_phantom) @ T_world_from_probe",
+    "translation is converted from metres to millimetres",
+    "the slice plane is probe local X-Z"
+  ],
+  "locked_files": [
+    {
+      "path": "scripts/preview_us_normal_reslice_region.py",
+      "role": "canonical bottom-tangent direct sampler",
+      "sha256": "13f52c3cf2ae5ce47040cc3425e09e47292e52d154d6d1143eb5552e74c55161"
+    },
+    {
+      "path": "scripts/sample_rosbag_reslices.py",
+      "role": "validated multi-bag driver",
+      "sha256": "ede571ddb2c59cf7fbaf9a4088662bf11a33ca81caa12f7b5324f69918c0a0f9"
+    },
+    {
+      "path": "reslice/pose.py",
+      "role": "robot/probe/phantom pose chain",
+      "sha256": "1618d8071e1e04b968083748ae2f3e2f82af9291d47b01186c46e16973f964a7"
+    },
+    {
+      "path": "reslice/io.py",
+      "role": "volume and transform loading",
+      "sha256": "5cc0a272ae8d59ac98cc9f260e3e88f605dc4ac611a3fa50811043146e236e0e"
+    },
+    {
+      "path": "reslice/sampling.py",
+      "role": "broad physical-plane sampling used for surface anchoring",
+      "sha256": "6904c8dbbdd6a97ca21b2f57721806c9698a0f3b7045c0cbd68b9031777108f5"
+    },
+    {
+      "path": "reslice/sector.py",
+      "role": "surface detection and sector helpers",
+      "sha256": "838ba6230d56853341b77d6a97f72f4b5bac0e9e51fd06a3f05be8cbbf2f954e"
+    },
+    {
+      "path": "plot_script/plots_reslice/compare.py",
+      "role": "validated near distance, signs, and broad-plane dimensions",
+      "sha256": "42a5b9fdba4e37d3e7e2266f6be3297334104b900713429220279fd3fcb4bd4e"
+    }
+  ],
+  "locked_reference_inputs": [
+    {
+      "path": "../cbct_20260612/cbct_20260612/CBCT.mhd",
+      "role": "0612 CBCT geometry header",
+      "sha256": "e242b7a2565cef7b9f7e028552a26bf99fd697c8b4f9f1dd66d5e5c94bbe0386"
+    },
+    {
+      "path": "../deepussim-main/slicer_3.0/outputs/step01_physical_frame_origin000/physical_frame_report.json",
+      "role": "0612 reconstruction affine",
+      "sha256": "96728b5205e0396795722ab821e362c986c06f42d4adb0d6cb56c54ebc8d005c"
+    },
+    {
+      "path": "../deepussim-main/slicer_3.0/outputs/yesterday_T_world_from_phantom_liedown.txt",
+      "role": "0612 world-from-phantom placement",
+      "sha256": "c2c8e89a303bfed18845c8e89000c361454f58f82228bf114e106f80e6cb3fed"
+    }
+  ]
+}

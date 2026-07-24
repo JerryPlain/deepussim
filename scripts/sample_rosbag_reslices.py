@@ -4,7 +4,9 @@
 The extracted ``scan*.npz`` files are lossless working copies of the image, pose and
 contact streams in the corresponding ``scan*.bag`` files.  This script samples only
 contact frames, covers every available scan once, and distributes any remaining samples
-across distinct scans before reusing one.
+across distinct scans before reusing one.  CBCT is directly sampled with the fitted real-US
+inner arc, perpendicular side rays, and bottom-tangent concentric outer arc.  Rows and
+columns share one physical mm/px value; there is no final crop-and-resize operation.
 """
 from __future__ import annotations
 
@@ -20,12 +22,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from plot_script.plots_reslice.compare import (  # noqa: E402
-    _normalize_display,
-    cbct_sector_zoom,
-)
+from plot_script.plots_reslice.compare import _normalize_display  # noqa: E402
 from reslice import pose as P  # noqa: E402
 from reslice.io import load_transform_4x4, load_volume_data  # noqa: E402
+from preview_us_normal_reslice_region import (  # noqa: E402
+    US_SPACING_MM,
+    cbct_bottom_tangent_reslice,
+)
 
 
 def _scan_number(path: Path) -> int:
@@ -68,14 +71,8 @@ def main() -> None:
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--n", type=int, default=20)
     ap.add_argument("--seed", type=int, default=20260722)
-    ap.add_argument(
-        "--crop-margin-px",
-        type=int,
-        default=0,
-        help="final crop margin only; smaller values enlarge the unchanged CBCT fan",
-    )
-    ap.add_argument("--crop-near-mm", type=float, default=15.0)
-    ap.add_argument("--crop-margin-cols-px", type=int, default=-66)
+    ap.add_argument("--inner-arc-threshold", type=float, default=30.0)
+    ap.add_argument("--us-spacing-mm", type=float, default=US_SPACING_MM)
     args = ap.parse_args()
 
     paths = sorted(args.sequences_dir.glob("scan*.npz"), key=_scan_number)
@@ -123,14 +120,13 @@ def main() -> None:
         phantom_from_probe_mm = P.probe_pose_in_phantom_centered_mm(
             world_from_probe, world_from_phantom
         )
-        cbct = cbct_sector_zoom(
+        cbct, geometry, reslice_debug = cbct_bottom_tangent_reslice(
             volume,
             affine,
             phantom_from_probe_mm,
-            us.shape[:2],
-            crop_margin_px=args.crop_margin_px,
-            crop_near_mm=args.crop_near_mm,
-            crop_margin_cols_px=args.crop_margin_cols_px,
+            us,
+            inner_arc_threshold=args.inner_arc_threshold,
+            us_spacing_mm=args.us_spacing_mm,
         )
 
         bag = args.bag_dir / f"{sequence.stem}.bag"
@@ -143,6 +139,14 @@ def main() -> None:
             "T_world_from_ee_m": world_from_ee.tolist(),
             "T_world_from_probe_m": world_from_probe.tolist(),
             "T_phantom_from_probe_mm": phantom_from_probe_mm.tolist(),
+            "inner_arc_center_xy_px": np.asarray(geometry["centre"]).tolist(),
+            "inner_radius_px": float(geometry["inner_radius"]),
+            "outer_radius_px": float(geometry["outer_radius"]),
+            "inner_arc_median_error_px": float(geometry["median_residual"]),
+            "bottom_tangent_xy_px": np.asarray(geometry["bottom_tangent"]).tolist(),
+            "mm_per_pixel": float(reslice_debug["mm_per_pixel"]),
+            "surface_pixel_rc": reslice_debug["surface_pixel_rc"],
+            "post_reslice_resize": False,
         }
         records.append(record)
         us_images.append(us)
@@ -152,7 +156,9 @@ def main() -> None:
         axes[0].imshow(_normalize_display(us), cmap="gray", vmin=0, vmax=1)
         axes[0].set_title("Real US")
         axes[1].imshow(cbct, cmap="gray", vmin=0, vmax=1)
-        axes[1].set_title("CBCT reslice")
+        axes[1].set_title(
+            f"CBCT bottom-tangent reslice ({float(reslice_debug['mm_per_pixel']):.4f} mm/px)"
+        )
         for ax in axes:
             ax.axis("off")
         xyz = world_from_ee[:3, 3]
@@ -188,7 +194,8 @@ def main() -> None:
         ax.text(0.99, 0.98, "CBCT reslice", color="yellow", fontsize=8,
                 ha="right", va="top", transform=ax.transAxes)
     fig.suptitle(
-        f"20 stratified random contact samples from 15 ROS bags (seed={args.seed})",
+        f"{args.n} stratified random contact samples from {len(paths)} ROS bags "
+        f"(bottom-tangent, no resize; seed={args.seed})",
         fontsize=15,
     )
     fig.tight_layout(rect=(0, 0, 1, 0.98))
@@ -199,9 +206,10 @@ def main() -> None:
         json.dumps(
             {
                 "seed": args.seed,
-                "crop_margin_px": args.crop_margin_px,
-                "crop_near_mm": args.crop_near_mm,
-                "crop_margin_cols_px": args.crop_margin_cols_px,
+                "inner_arc_threshold": args.inner_arc_threshold,
+                "us_spacing_mm": args.us_spacing_mm,
+                "geometry": "US inner arc + perpendicular rays + bottom-tangent outer arc",
+                "post_reslice_resize": False,
                 "sampling": "one contact frame per bag plus five additional distinct bags",
                 "volume": str(args.volume),
                 "report": str(args.report),
