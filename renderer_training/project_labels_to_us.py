@@ -3,16 +3,17 @@
 
 Rationale
 ---------
-Every LC2-registered US frame has a refined probe pose in CBCT space. The intensity CBCT
-sector at that pose is *known* to align with the real US (that alignment is the whole premise
-of the renderer pairs). So resampling ``labels.nrrd`` on the **same** plane/geometry — but with
-nearest-neighbour sampling so class ids are never blended — yields a per-frame segmentation
-mask that is pixel-aligned with the US, for free. No manual US labelling.
+Every LC2-registered US frame has a refined probe pose in CBCT space. Sampling the CBCT
+directly onto the **real US display fan** (``reslice.us_display.render_on_us_grid``, fitted by
+``calib/fit_us_fan.py``) puts the intensity pixel-aligned with the US. Sampling ``labels.nrrd``
+on that *same* grid with nearest-neighbour (``order=0``, so class ids are never blended) yields
+a per-frame segmentation mask aligned with the US for free. No manual US labelling.
 
-This reuses ``plot_script.plots_reslice.compare.cbct_sector_zoom``'s geometry verbatim: the
-apex/sector/crop/zoom are all computed from the *intensity* sector, then applied identically to
-the label sector (``order=0``). A self-check reproduces ``pairs.npz['cbct']`` (corr ~1.0) to prove
-the label plane matches the stored, alignment-validated intensity plane.
+Both channels go through the identical geometry, so intensity and labels are co-registered by
+construction. Alignment to the *US itself* comes from the LC2-refined pose plus the fitted fan,
+and is asserted in ``tests/test_display_alignment.py`` (support IoU vs the US fan) -- NOT by the
+old ``corr(reslice, pairs['cbct'])`` self-check, which was a tautology (it only proved the
+reslice reproduced the stored sector, never that the sector matched the US).
 
     module load python/3.12-base
     python renderer_training/project_labels_to_us.py --sequence scan1 --n 6
@@ -31,14 +32,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from reslice import pose as P                                              # noqa: E402
 from reslice import sector as sec                                         # noqa: E402
 from reslice.frame import affine_from_sitk                               # noqa: E402
 from reslice.io import load_volume_data                                  # noqa: E402
-from reslice.sampling import reslice_rectangular_plane                   # noqa: E402
-from plot_script.plots_reslice.compare import (                          # noqa: E402
-    FAN, SLICE_W, SLICE_H, AXIAL_SIGN, LATERAL_SIGN,
-)
+from reslice.us_display import UsDisplayFan, render_on_us_grid           # noqa: E402
 
 DEFAULT_VOLUME = REPO_ROOT / "data" / "cbct_20260612" / "CBCT.mhd"
 DEFAULT_LABELS = REPO_ROOT / "data" / "cbct_20260612" / "labels.nrrd"
@@ -46,50 +43,38 @@ DEFAULT_PAIRS = REPO_ROOT / "data" / "renderer_lc2_pairs" / "pairs.npz"
 DEFAULT_OUT = REPO_ROOT / "figures" / "9_label_projection_check"
 
 
-def sector_zoom_pair(vol_int, vol_lab, affine, pose, target_shape):
-    """Resliced (intensity, label) sectors sharing one geometry.
+def sector_zoom_pair(vol_int, vol_lab, affine, pose, target_shape, fan=None):
+    """Resliced (intensity, label) images sharing one geometry, on the real US display grid.
 
-    The intensity path is byte-for-byte ``cbct_sector_zoom``; the label path samples the
-    same plane with ``order=0`` and inherits the identical apex/sector/crop/zoom.
+    Both volumes are sampled directly onto the fitted US fan (``render_on_us_grid``): the
+    intensity with ``order=1`` (trilinear) and the labels with ``order=0`` (nearest, so class
+    ids are never blended). Pixel-aligned to the US by construction -- no crop/resize, no apex
+    detection. ``target_shape`` is kept for backward compatibility and only used to resize if
+    it differs from the fan shape (it never does in the pipeline: it is the real frame size).
     """
-    plane = P.plane_from_probe_pose(pose, "probe-xz", 0.0)
-    rect_i, valid = reslice_rectangular_plane(
-        vol_int, affine, plane, width_mm=SLICE_W, height_mm=SLICE_H,
-        n_rows=target_shape[0], n_cols=target_shape[1],
-        axial_sign=AXIAL_SIGN, lateral_sign=LATERAL_SIGN, order=1)
-    rect_l, _ = reslice_rectangular_plane(
-        vol_lab, affine, plane, width_mm=SLICE_W, height_mm=SLICE_H,
-        n_rows=target_shape[0], n_cols=target_shape[1],
-        axial_sign=AXIAL_SIGN, lateral_sign=LATERAL_SIGN, order=0)
-    rect_i, valid = np.rot90(rect_i, 2), np.rot90(valid, 2)
-    rect_l = np.rot90(rect_l, 2)
+    fan = fan or _get_fan()
+    int_img, _ = render_on_us_grid(vol_int, affine, pose, fan, order=1)
+    lab_img, _ = render_on_us_grid(vol_lab, affine, pose, fan, order=0, fill=0.0)
+    int_img = sec.normalize_image(int_img)
+    lab = np.rint(lab_img).astype(np.int16)
 
-    _, thr, _ = sec.detect_content_top_row(rect_i, valid, threshold=None, min_pixels=8)
-    probe_px = sec.project_point_to_display_pixel(
-        pose[:3, 3], plane, width_mm=SLICE_W, height_mm=SLICE_H,
-        rows=rect_i.shape[0], cols=rect_i.shape[1], axial_sign=AXIAL_SIGN,
-        lateral_sign=LATERAL_SIGN, display_rot180=True)
-    depth_dir = sec.project_direction_to_display_rc(
-        pose[:3, 2], plane, axial_sign=AXIAL_SIGN, lateral_sign=LATERAL_SIGN,
-        display_rot180=True)
-    apex, _ = sec.apex_from_pose_and_edge(
-        rect_i, valid, threshold=thr, probe_pixel_rc=probe_px,
-        depth_direction_rc=depth_dir, max_line_distance_px=5.0)
-    sector_i, mask, dbg = sec.apply_sector(
-        rect_i, valid, top_margin_rows=2, apex_col_fraction=0.5,
-        apex_pixel_rc=apex, depth_direction_rc=depth_dir,
-        content_threshold=None, content_min_pixels=8,
-        width_mm=SLICE_W, height_mm=SLICE_H, **FAN)
-    crop_mask = sec.sector_mask_in_display_image(
-        rect_i.shape, dbg["apex_row"], dbg["apex_col"], np.asarray(dbg["depth_direction_rc"]),
-        dbg["fov_deg"], dbg["depth_mm"], 0.0, dbg["mm_per_row"], dbg["mm_per_col"])
+    if tuple(target_shape) != int_img.shape:
+        from scipy.ndimage import zoom as _zoom
 
-    int_zoom, _ = sec.crop_and_zoom_sector(
-        sec.normalize_image(sector_i), mask, crop_mask, tuple(target_shape), margin_px=18, order=1)
-    sector_l = np.where(mask, rect_l, 0.0)
-    lab_zoom, _ = sec.crop_and_zoom_sector(
-        sector_l, mask, crop_mask, tuple(target_shape), margin_px=18, order=0)
-    return int_zoom, np.rint(lab_zoom).astype(np.int16)
+        zr = (target_shape[0] / int_img.shape[0], target_shape[1] / int_img.shape[1])
+        int_img = _zoom(int_img, zr, order=1)
+        lab = np.rint(_zoom(lab.astype(np.float32), zr, order=0)).astype(np.int16)
+    return int_img.astype(np.float32), lab
+
+
+_FAN: UsDisplayFan | None = None
+
+
+def _get_fan() -> UsDisplayFan:
+    global _FAN
+    if _FAN is None:
+        _FAN = UsDisplayFan.load()
+    return _FAN
 
 
 def _load_names(path: Path) -> dict[int, str]:
@@ -129,7 +114,7 @@ def main() -> None:
     import SimpleITK as sitk
     affine = affine_from_sitk(sitk.ReadImage(str(args.volume)))
 
-    us_all = pairs["us"]; cbct_all = pairs["cbct"]; poses = pairs["refined_poses"]
+    us_all = pairs["us"]; poses = pairs["refined_poses"]
 
     import matplotlib
     matplotlib.use("Agg")
@@ -147,11 +132,13 @@ def main() -> None:
         int_zoom, lab = sector_zoom_pair(vol_int, vol_lab, affine, poses[i], us.shape[:2])
         masks_out.append(lab)
 
-        # self-check: our intensity plane must reproduce the stored, alignment-validated cbct
-        a = cbct_all[i].astype(float)
+        # QC: correlation between the rendered CBCT intensity and the REAL US, over the fan
+        # support. This is the honest alignment signal (modest, CBCT<->US modality gap); the old
+        # corr-against-stored-cbct check was a tautology -- see the module docstring.
         def _n(x):
             lo, hi = np.nanpercentile(x, [1, 99]); return np.clip((x - lo) / max(hi - lo, 1e-6), 0, 1)
-        corr = float(np.corrcoef(_n(a).ravel(), _n(int_zoom).ravel())[0, 1])
+        sup = _get_fan().support_mask(int_zoom.shape)
+        corr = float(np.corrcoef(_n(int_zoom)[sup].ravel(), _n(us)[sup].ravel())[0, 1])
 
         present = [(c, int((lab == c).sum())) for c in np.unique(lab) if c != 0]
         for c, n in present:
@@ -169,7 +156,7 @@ def main() -> None:
             col = cm.tab20((c % 20) / 20.0)
             over[lab == c] = (*col[:3], 0.45)
         axes[row, 1].imshow(over)
-        axes[row, 1].set_title(f"US + projected labels\ncorr(int,stored)={corr:.3f}", fontsize=8)
+        axes[row, 1].set_title(f"US + projected labels\ncorr(cbct,us)={corr:.3f}", fontsize=8)
         axes[row, 2].imshow(lab, cmap="tab20", vmin=0, vmax=20); axes[row, 2].set_title(f"label map\n{tag}", fontsize=7)
         for a_ in axes[row]:
             a_.axis("off")
